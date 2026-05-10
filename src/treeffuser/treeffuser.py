@@ -81,7 +81,7 @@ class Treeffuser(BaseTabularDiffusion):
             SDE: The scale of the SDE at t=T (see `VESDE`, `VPSDE`, `SubVPSDE`).
         score_parameterization : str
             Score-model regression target and score reconstruction strategy. Currently supported:
-            "noise".
+            "noise" and "x0".
         noise_features : str
             Noise/time feature representation passed to LightGBM. Currently supported:
             "raw_time" and "raw_time_log_std".

@@ -46,12 +46,16 @@ class ScoreParameterization(abc.ABC):
     @abc.abstractmethod
     def reconstruct_score(
         self,
-        prediction: Float[np.ndarray, "batch"],
-        perturbed_y: Float[np.ndarray, "batch"],
-        std: Float[np.ndarray, "batch"],
-        t: Float[np.ndarray, "batch 1"],
-    ) -> Float[np.ndarray, "batch"]:
+        prediction: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+        predicted_mean: Float[np.ndarray, "batch y_dim"] | None = None,
+    ) -> Float[np.ndarray, "batch y_dim"]:
         pass
+
+    @property
+    def requires_prediction_mean(self) -> bool:
+        return False
 
 
 class NoiseParameterization(ScoreParameterization):
@@ -85,12 +89,60 @@ class NoiseParameterization(ScoreParameterization):
 
     def reconstruct_score(
         self,
-        prediction: Float[np.ndarray, "batch"],
-        perturbed_y: Float[np.ndarray, "batch"],
-        std: Float[np.ndarray, "batch"],
-        t: Float[np.ndarray, "batch 1"],
-    ) -> Float[np.ndarray, "batch"]:
+        prediction: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+        predicted_mean: Float[np.ndarray, "batch y_dim"] | None = None,
+    ) -> Float[np.ndarray, "batch y_dim"]:
         return prediction / std
+
+
+class X0Parameterization(ScoreParameterization):
+    """
+    Denoised target parameterization: train LightGBM to predict the clean response y0.
+
+    Since the noising distribution is Gaussian,
+
+        y_t | y0 ~ N(mean_t(y0), std(t)^2 I),
+
+    the conditional score is
+
+        score(y_t | y0, t) = (mean_t(y0) - y_t) / std(t)^2.
+
+    The fitted model approximates E[y0 | y_t, x, t]. For the currently supported SDEs,
+    mean_t(y0) is linear in y0, so plugging the denoised prediction into mean_t gives the
+    corresponding marginal-score estimate.
+    """
+
+    @property
+    def name(self) -> str:
+        return "x0"
+
+    def make_target(
+        self,
+        y0: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        z: Float[np.ndarray, "batch y_dim"],
+        mean: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+        t: Float[np.ndarray, "batch 1"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        return y0
+
+    def reconstruct_score(
+        self,
+        prediction: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+        predicted_mean: Float[np.ndarray, "batch y_dim"] | None = None,
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        if predicted_mean is None:
+            raise ValueError("X0Parameterization requires mean_t(prediction) to reconstruct the score.")
+        return (predicted_mean - perturbed_y) / (std**2)
+
+    @property
+    def requires_prediction_mean(self) -> bool:
+        return True
 
 
 def get_score_parameterization(
@@ -100,6 +152,8 @@ def get_score_parameterization(
         return parameterization
     if parameterization == "noise":
         return NoiseParameterization()
+    if parameterization == "x0":
+        return X0Parameterization()
     raise ValueError(f"Unknown score parameterization: {parameterization}")
 
 
@@ -411,7 +465,7 @@ class LightGBMScoreModel(ScoreModel):
             raise ValueError("The model has not been fitted yet.")
         assert self.models is not None
 
-        scores = []
+        predictions = []
         predictors = self.noise_feature_builder.make_features(perturbed_y=y, X=X, t=t, sde=self.sde)
         _, std = self.sde.get_mean_std_pt_given_y0(y, t)
         for i in range(y.shape[-1]):
@@ -421,15 +475,18 @@ class LightGBMScoreModel(ScoreModel):
                     message="X does not have valid feature names.*",
                     category=UserWarning,
                 )
-                score_p = self.models[i].predict(predictors, num_threads=self.n_jobs)
-            score = self.score_parameterization.reconstruct_score(
-                prediction=score_p,
-                perturbed_y=y[:, i],
-                std=std[:, i],
-                t=t,
-            )
-            scores.append(score)
-        return np.array(scores).T
+                prediction_i = self.models[i].predict(predictors, num_threads=self.n_jobs)
+            predictions.append(prediction_i)
+        predictions = np.array(predictions).T
+        predicted_mean = None
+        if self.score_parameterization.requires_prediction_mean:
+            predicted_mean, _ = self.sde.get_mean_std_pt_given_y0(predictions, t)
+        return self.score_parameterization.reconstruct_score(
+            prediction=predictions,
+            perturbed_y=y,
+            std=std,
+            predicted_mean=predicted_mean,
+        )
 
     def fit(
         self,

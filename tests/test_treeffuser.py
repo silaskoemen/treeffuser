@@ -132,6 +132,27 @@ def test_treeffuser_exposes_noise_feature_axis():
     assert model.score_model.noise_feature_builder.name == "raw_time_log_std"
 
 
+def test_treeffuser_exposes_x0_parameterization():
+    rng = np.random.default_rng(seed=1)
+    X = rng.normal(size=(60, 2))
+    y = (X[:, :1] + 0.5 * X[:, 1:] + rng.normal(scale=0.1, size=(60, 1))).reshape(-1, 1)
+
+    model = Treeffuser(
+        n_repeats=1,
+        n_estimators=2,
+        early_stopping_rounds=None,
+        score_parameterization="x0",
+        noise_features="raw_time",
+        seed=0,
+        verbose=-1,
+    )
+    model.fit(X=X, y=y)
+
+    assert model.score_parameterization == "x0"
+    assert isinstance(model.score_model, LightGBMScoreModel)
+    assert model.score_model.score_parameterization.name == "x0"
+
+
 def test_dataframe_input():
     """Basic test for DataFrame input support."""
     n = 10**3

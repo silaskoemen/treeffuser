@@ -3,15 +3,19 @@ Contains all of the test for the different score model classes.
 """
 
 import numpy as np
+import pytest
 from einops import repeat
 
 from treeffuser._score_models import LightGBMScoreModel
 from treeffuser._score_models import NoiseParameterization
 from treeffuser._score_models import RawTimeFeatureBuilder
 from treeffuser._score_models import RawTimeLogStdFeatureBuilder
+from treeffuser._score_models import X0Parameterization
 from treeffuser._score_models import _make_training_data
 from treeffuser._score_models import get_noise_feature_builder
+from treeffuser._score_models import get_score_parameterization
 from treeffuser.sde.diffusion_sdes import VESDE
+from treeffuser.sde.diffusion_sdes import VPSDE
 
 from .utils import generate_bimodal_linear_regression_data
 from .utils import r2_score
@@ -33,14 +37,44 @@ def test_noise_parameterization_matches_current_behavior():
         t=t,
     )
     score = parameterization.reconstruct_score(
-        prediction=prediction,
-        perturbed_y=np.zeros_like(prediction),
-        std=std,
-        t=t,
+        prediction=prediction.reshape(-1, 1),
+        perturbed_y=np.zeros_like(prediction).reshape(-1, 1),
+        std=std.reshape(-1, 1),
     )
 
     assert np.allclose(target, -z)
-    assert np.allclose(score, prediction / std)
+    assert np.allclose(score[:, 0], prediction / std)
+
+
+def test_x0_parameterization_reconstructs_score_from_denoised_prediction():
+    parameterization = X0Parameterization()
+    y0 = np.array([[1.0, -2.0], [0.5, 4.0]])
+    t = np.array([[0.1], [0.2]])
+    z = np.array([[0.3, -0.4], [1.2, -0.7]])
+    sde = VPSDE(hyperparam_min=0.1, hyperparam_max=1.0)
+    mean, std = sde.get_mean_std_pt_given_y0(y0, t)
+    perturbed_y = mean + std * z
+
+    target = parameterization.make_target(
+        y0=y0,
+        perturbed_y=perturbed_y,
+        z=z,
+        mean=mean,
+        std=std,
+        t=t,
+    )
+    score = parameterization.reconstruct_score(
+        prediction=y0,
+        perturbed_y=perturbed_y,
+        std=std,
+        predicted_mean=mean,
+    )
+    expected_score = (mean - perturbed_y) / (std**2)
+
+    assert parameterization.name == "x0"
+    assert get_score_parameterization("x0").name == "x0"
+    assert np.array_equal(target, y0)
+    assert np.allclose(score, expected_score)
 
 
 def test_raw_time_feature_builder_matches_concatenation():
@@ -141,6 +175,7 @@ def test_make_training_data_with_raw_time_log_std_preserves_cat_idx():
     assert target_val is not None
     assert predictors_train.shape[1] == y_dim + x_dim + 2
     assert predictors_val.shape[1] == y_dim + x_dim + 2
+    assert not np.array_equal(predictors_train[:, -1], predictors_train[:, -2])
     assert target_train.shape[1] == y_dim
     assert transformed_cat_idx == [c + y_dim for c in cat_idx]
 
@@ -205,6 +240,42 @@ def test_lightgbm_score_model_with_raw_time_log_std_scores_finite_near_eps():
 
     scores = score_model.score(y=y_perturbed, X=X, t=t)
 
+    assert scores.shape == y.shape
+    assert np.all(np.isfinite(scores))
+
+
+@pytest.mark.parametrize("noise_features", ["raw_time", "raw_time_log_std"])
+def test_lightgbm_score_model_with_x0_scores_finite(noise_features):
+    n, x_dim = 160, 2
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(n, x_dim))
+    y = np.column_stack(
+        [
+            X[:, 0] + rng.normal(scale=0.1, size=n),
+            X[:, 0] - X[:, 1] + rng.normal(scale=0.1, size=n),
+        ]
+    )
+    sde = VESDE(hyperparam_min=0.01, hyperparam_max=float(y.std()))
+    score_model = LightGBMScoreModel(
+        score_parameterization="x0",
+        noise_features=noise_features,
+        verbose=-1,
+        n_estimators=10,
+        learning_rate=0.1,
+        n_repeats=1,
+        eval_percent=None,
+        seed=0,
+    )
+
+    score_model.fit(X, y, sde)
+    t = np.concatenate([np.full((n // 2, 1), 1e-5), np.full((n - n // 2, 1), sde.T * 0.9)])
+    z = rng.normal(size=y.shape)
+    mean, std = sde.get_mean_std_pt_given_y0(y, t)
+    y_perturbed = mean + z * std
+
+    scores = score_model.score(y=y_perturbed, X=X, t=t)
+
+    assert score_model.score_parameterization.name == "x0"
     assert scores.shape == y.shape
     assert np.all(np.isfinite(scores))
 
