@@ -7,6 +7,8 @@ __pycache__
 *.bak
 .DS_Store
 
+plans
+
 # C extensions
 *.so
 
@@ -76,6 +78,7 @@ docs/_build
 
 # Data files
 **/raw/**
+!benchmarks/results/raw/.gitkeep
 **/data.npy
 examples/m5/*
 

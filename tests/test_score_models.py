@@ -5,6 +5,7 @@ Contains all of the test for the different score model classes.
 import numpy as np
 from einops import repeat
 
+from treeffuser._score_models import _make_training_data
 from treeffuser._score_models import LightGBMScoreModel
 from treeffuser.sde.diffusion_sdes import VESDE
 
@@ -180,3 +181,44 @@ def test_different_seeds_do_not_give_same_results():
     # Check that the score model gives different results
     msg = "The score model gives the same results for different seeds"
     assert not np.allclose(scores_a, scores_b), msg
+
+
+def test_make_training_data_respects_validation_split():
+    X = np.arange(20, dtype=float).reshape(-1, 1)
+    y = np.zeros((20, 1))
+    sde = VESDE(hyperparam_min=0.01, hyperparam_max=1.0)
+
+    predictors_train, predictors_val, _, _, _ = _make_training_data(
+        X=X,
+        y=y,
+        sde=sde,
+        n_repeats=3,
+        eval_percent=0.25,
+        seed=0,
+    )
+
+    x_train_ids = set(predictors_train[:, 1].astype(int))
+    x_val_ids = set(predictors_val[:, 1].astype(int))
+    assert x_train_ids.isdisjoint(x_val_ids)
+
+
+def test_make_training_data_does_not_mutate_global_numpy_rng():
+    X = np.arange(10, dtype=float).reshape(-1, 1)
+    y = np.zeros((10, 1))
+    sde = VESDE(hyperparam_min=0.01, hyperparam_max=1.0)
+
+    np.random.seed(123)
+    expected = np.random.random(5)
+
+    np.random.seed(123)
+    _make_training_data(
+        X=X,
+        y=y,
+        sde=sde,
+        n_repeats=2,
+        eval_percent=0.2,
+        seed=999,
+    )
+    observed = np.random.random(5)
+
+    assert np.allclose(observed, expected)

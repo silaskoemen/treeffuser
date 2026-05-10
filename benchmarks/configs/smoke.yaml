@@ -1,0 +1,32 @@
+seeds: [0, 1]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  - name: heteroscedastic_gaussian_linear
+    n_train: 500
+    n_test: 300
+    x_dim: 3
+  - name: bimodal_mixture
+    n_train: 500
+    n_test: 300
+    x_dim: 3
+
+variants:
+  - name: baseline_current
+    params:
+      n_repeats: 5
+      n_estimators: 200
+      early_stopping_rounds: 20
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+
+samplers:
+  - n_samples: 100
+    n_steps: 30
+    n_parallel: 20
+

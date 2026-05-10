@@ -30,7 +30,7 @@ def _check_array(array: ndarray[float]):
 
     # Check shapes
     if array.ndim > 2:
-        raise ValueError("Input array cannot have more than three dimensions.")
+        raise ValueError("Input array cannot have more than two dimensions.")
     elif array.ndim == 1:
         array = array.reshape(-1, 1)
 
@@ -205,7 +205,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
             else:
                 raise TypeError(
                     "Input data `X` must be a numpy array or a pandas DataFrame."
-                    f"Reveived {type(X).__name}."
+                    f"Received {type(X).__name__}."
                 )
             X = _check_array(X)
 
@@ -217,7 +217,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
             elif not isinstance(y, np.ndarray):
                 raise TypeError(
                     "Target data `y` must be a numpy array, a pandas Series or a pandas DataFrame."
-                    f"Received {type(y).__name}."
+                    f"Received {type(y).__name__}."
                 )
 
             if reset_data_schema:

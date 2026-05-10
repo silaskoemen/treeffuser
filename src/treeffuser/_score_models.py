@@ -86,8 +86,7 @@ def _make_training_data(
     """
     EPS = 1e-5  # smallest step we can sample from
     T = sde.T
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     X_train, X_test, y_train, y_test = X, None, y, None
     predictors_train, predictors_val = None, None
@@ -99,10 +98,10 @@ def _make_training_data(
         )
 
     # TRAINING DATA
-    X_train = np.tile(X, (n_repeats, 1))
-    y_train = np.tile(y, (n_repeats, 1))
-    t_train = np.random.uniform(0, 1, size=(y_train.shape[0], 1)) * (T - EPS) + EPS
-    z_train = np.random.normal(size=y_train.shape)
+    X_train = np.tile(X_train, (n_repeats, 1))
+    y_train = np.tile(y_train, (n_repeats, 1))
+    t_train = rng.uniform(0, 1, size=(y_train.shape[0], 1)) * (T - EPS) + EPS
+    z_train = rng.normal(size=y_train.shape)
 
     train_mean, train_std = sde.get_mean_std_pt_given_y0(y_train, t_train)
     perturbed_y_train = train_mean + train_std * z_train
@@ -111,8 +110,8 @@ def _make_training_data(
 
     # VALIDATION DATA
     if eval_percent is not None:
-        t_val = np.random.uniform(0, 1, size=(y_test.shape[0], 1)) * (T - EPS) + EPS
-        z_val = np.random.normal(size=(y_test.shape[0], y_test.shape[1]))
+        t_val = rng.uniform(0, 1, size=(y_test.shape[0], 1)) * (T - EPS) + EPS
+        z_val = rng.normal(size=(y_test.shape[0], y_test.shape[1]))
 
         val_mean, val_std = sde.get_mean_std_pt_given_y0(y_test, t_val)
         perturbed_y_val = val_mean + val_std * z_val
@@ -135,9 +134,9 @@ class ScoreModel(abc.ABC):
     @abc.abstractmethod
     def score(
         self,
-        X: Float[np.ndarray, "batch x_dim"],
         y: Float[np.ndarray, "batch y_dim"],
-        t: Int[np.ndarray, "batch"],
+        X: Float[np.ndarray, "batch x_dim"],
+        t: Int[np.ndarray, "batch 1"],
     ):
 
         pass
