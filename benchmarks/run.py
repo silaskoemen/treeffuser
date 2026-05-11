@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ def main() -> None:
     config_path = Path(args.config)
     config = load_config(config_path)
     output_path = Path(args.output) if args.output else default_output_path(config_path)
-    from benchmarks.harness import run_benchmark
+    from benchmarks.harness import run_benchmark  # noqa: PLC0415
 
     run_benchmark(config=config, output_path=output_path)
     print(f"Wrote benchmark results to {output_path}")
@@ -30,7 +31,7 @@ def parse_args() -> argparse.Namespace:
 
 def load_config(path: Path) -> dict[str, Any]:
     try:
-        import yaml
+        import yaml  # noqa: PLC0415
     except ModuleNotFoundError:
         return _load_simple_yaml(path)
 

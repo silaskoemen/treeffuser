@@ -1,0 +1,48 @@
+seeds: [0, 1, 2, 3, 4]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  - name: diabetes
+    n_train: 300
+    n_test: 142
+
+variants:
+  - name: baseline_raw_time
+    params:
+      score_parameterization: noise
+      noise_features: raw_time
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+  - name: raw_time_log_std
+    params:
+      score_parameterization: noise
+      noise_features: raw_time_log_std
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+  - name: edm_raw_time_log_std
+    params:
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+
+samplers:
+  - n_samples: 200
+    n_steps: 50
+    n_parallel: 20

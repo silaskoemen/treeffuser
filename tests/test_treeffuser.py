@@ -4,6 +4,7 @@ import pytest
 from scipy.stats import ks_2samp
 
 from treeffuser import Treeffuser
+from treeffuser._score_models import EDMParameterization
 from treeffuser._score_models import LightGBMScoreModel
 
 from .utils import gaussian_mixture_pdf
@@ -151,6 +152,31 @@ def test_treeffuser_exposes_x0_parameterization():
     assert model.score_parameterization == "x0"
     assert isinstance(model.score_model, LightGBMScoreModel)
     assert model.score_model.score_parameterization.name == "x0"
+
+
+def test_treeffuser_exposes_edm_parameterization():
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(80, 2))
+    y = X[:, :1] + rng.normal(scale=0.2, size=(80, 1))
+
+    model = Treeffuser(
+        n_repeats=1,
+        n_estimators=5,
+        early_stopping_rounds=None,
+        score_parameterization="edm",
+        noise_features="raw_time_log_std",
+        edm_sigma_data=1.7,
+        seed=0,
+        verbose=-1,
+    )
+    model.fit(X=X, y=y)
+
+    assert model.score_parameterization == "edm"
+    assert model.edm_sigma_data == 1.7
+    assert isinstance(model.score_model, LightGBMScoreModel)
+    assert model.score_model.score_parameterization.name == "edm"
+    assert isinstance(model.score_model.score_parameterization, EDMParameterization)
+    assert model.score_model.score_parameterization.sigma_data == 1.7
 
 
 def test_dataframe_input():

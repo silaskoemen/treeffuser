@@ -57,6 +57,21 @@ class ScoreParameterization(abc.ABC):
     def requires_prediction_mean(self) -> bool:
         return False
 
+    def make_feature_perturbed_y(
+        self,
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        return perturbed_y
+
+    def make_prediction_y0(
+        self,
+        prediction: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        return prediction
+
 
 class NoiseParameterization(ScoreParameterization):
     """
@@ -145,8 +160,107 @@ class X0Parameterization(ScoreParameterization):
         return True
 
 
+class EDMParameterization(ScoreParameterization):
+    """
+    EDM-style preconditioned denoising parameterization.
+
+    The coefficient formulas are the EDM preconditioning coefficients from
+    Karras et al. For VESDE-style perturbations, `y_t = y0 + sigma * z`, they
+    have the usual EDM variance-normalization interpretation. For VPSDE and
+    SubVPSDE, this remains a valid preconditioned `x0` reparameterization, but
+    the coefficients are no longer the Bayes-optimal skip/input normalizers.
+
+    The noisy response is scaled before it is passed to the regressor,
+
+        y_in = c_in(sigma) * y_t,
+
+    and the regressor target is the preconditioned residual needed by the EDM
+    denoiser
+
+        D(y_t, sigma) = c_skip(sigma) * y_t + c_out(sigma) * F(y_in, x, sigma).
+
+    With standardized targets, `sigma_data=1` is the natural default. Treeffuser
+    standardizes `y` before score-model fitting, so this default matches the
+    public estimator path. Training the regressor on the residual target is
+    equivalent to the EDM weighted denoising objective because the usual EDM loss
+    weight cancels `c_out`.
+    """
+
+    def __init__(self, sigma_data: float = 1.0) -> None:
+        if sigma_data <= 0:
+            raise ValueError("sigma_data must be strictly positive.")
+        self.sigma_data = sigma_data
+
+    @property
+    def name(self) -> str:
+        return "edm"
+
+    def make_target(
+        self,
+        y0: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        z: Float[np.ndarray, "batch y_dim"],
+        mean: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+        t: Float[np.ndarray, "batch 1"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        c_skip, c_out, _ = self._coefficients(std)
+        return (y0 - c_skip * perturbed_y) / c_out
+
+    def reconstruct_score(
+        self,
+        prediction: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+        predicted_mean: Float[np.ndarray, "batch y_dim"] | None = None,
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        if predicted_mean is None:
+            raise ValueError("EDMParameterization requires mean_t(D(y_t, sigma)) to reconstruct the score.")
+        # `prediction` has already been converted into the denoised mean path.
+        return (predicted_mean - perturbed_y) / (std**2)
+
+    @property
+    def requires_prediction_mean(self) -> bool:
+        return True
+
+    def make_feature_perturbed_y(
+        self,
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        _, _, c_in = self._coefficients(std)
+        return c_in * perturbed_y
+
+    def make_prediction_y0(
+        self,
+        prediction: Float[np.ndarray, "batch y_dim"],
+        perturbed_y: Float[np.ndarray, "batch y_dim"],
+        std: Float[np.ndarray, "batch y_dim"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        c_skip, c_out, _ = self._coefficients(std)
+        return c_skip * perturbed_y + c_out * prediction
+
+    def _coefficients(
+        self,
+        std: Float[np.ndarray, "batch y_dim"],
+    ) -> tuple[
+        Float[np.ndarray, "batch y_dim"],
+        Float[np.ndarray, "batch y_dim"],
+        Float[np.ndarray, "batch y_dim"],
+    ]:
+        if np.any(std <= 0):
+            raise ValueError("EDMParameterization requires strictly positive SDE std values.")
+        sigma_data_sq = self.sigma_data**2
+        denom = std**2 + sigma_data_sq
+        c_skip = sigma_data_sq / denom
+        c_out = std * self.sigma_data / np.sqrt(denom)
+        c_in = 1.0 / np.sqrt(denom)
+        return c_skip, c_out, c_in
+
+
 def get_score_parameterization(
     parameterization: str | ScoreParameterization,
+    edm_sigma_data: float = 1.0,
 ) -> ScoreParameterization:
     if isinstance(parameterization, ScoreParameterization):
         return parameterization
@@ -154,6 +268,8 @@ def get_score_parameterization(
         return NoiseParameterization()
     if parameterization == "x0":
         return X0Parameterization()
+    if parameterization == "edm":
+        return EDMParameterization(sigma_data=edm_sigma_data)
     raise ValueError(f"Unknown score parameterization: {parameterization}")
 
 
@@ -181,6 +297,7 @@ class NoiseFeatureBuilder(abc.ABC):
         X: Float[np.ndarray, "batch x_dim"],
         t: Float[np.ndarray, "batch 1"],
         sde: DiffusionSDE,
+        std: Float[np.ndarray, "batch y_dim"] | None = None,
     ) -> Float[np.ndarray, "batch feat_dim"]:
         pass
 
@@ -200,6 +317,7 @@ class RawTimeFeatureBuilder(NoiseFeatureBuilder):
         X: Float[np.ndarray, "batch x_dim"],
         t: Float[np.ndarray, "batch 1"],
         sde: DiffusionSDE,
+        std: Float[np.ndarray, "batch y_dim"] | None = None,
     ) -> Float[np.ndarray, "batch feat_dim"]:
         return np.concatenate([perturbed_y, X, t], axis=1)
 
@@ -219,8 +337,10 @@ class RawTimeLogStdFeatureBuilder(NoiseFeatureBuilder):
         X: Float[np.ndarray, "batch x_dim"],
         t: Float[np.ndarray, "batch 1"],
         sde: DiffusionSDE,
+        std: Float[np.ndarray, "batch y_dim"] | None = None,
     ) -> Float[np.ndarray, "batch feat_dim"]:
-        _, std = sde.get_mean_std_pt_given_y0(perturbed_y, t)
+        if std is None:
+            _, std = sde.get_mean_std_pt_given_y0(perturbed_y, t)
         std_col = std[:, :1]
         if not np.allclose(std, std_col):
             raise ValueError("raw_time_log_std requires the SDE std to be identical across y dimensions.")
@@ -334,11 +454,16 @@ def _make_training_data(
 
     train_mean, train_std = sde.get_mean_std_pt_given_y0(y_train, t_train)
     perturbed_y_train = train_mean + train_std * z_train
-    predictors_train = noise_feature_builder.make_features(
+    feature_perturbed_y_train = score_parameterization.make_feature_perturbed_y(
         perturbed_y=perturbed_y_train,
+        std=train_std,
+    )
+    predictors_train = noise_feature_builder.make_features(
+        perturbed_y=feature_perturbed_y_train,
         X=X_train,
         t=t_train,
         sde=sde,
+        std=train_std,
     )
     predicted_train = score_parameterization.make_target(
         y0=y_train,
@@ -358,11 +483,16 @@ def _make_training_data(
 
         val_mean, val_std = sde.get_mean_std_pt_given_y0(y_test, t_val)
         perturbed_y_val = val_mean + val_std * z_val
-        predictors_val = noise_feature_builder.make_features(
+        feature_perturbed_y_val = score_parameterization.make_feature_perturbed_y(
             perturbed_y=perturbed_y_val,
+            std=val_std,
+        )
+        predictors_val = noise_feature_builder.make_features(
+            perturbed_y=feature_perturbed_y_val,
             X=X_test,
             t=t_val,
             sde=sde,
+            std=val_std,
         )
         predicted_val = score_parameterization.make_target(
             y0=y_test,
@@ -441,13 +571,17 @@ class LightGBMScoreModel(ScoreModel):
         seed: int | None = None,
         score_parameterization: str | ScoreParameterization = "noise",
         noise_features: str | NoiseFeatureBuilder = "raw_time",
+        edm_sigma_data: float = 1.0,
         **lgbm_args,
     ) -> None:
         self.n_repeats = n_repeats
         self.eval_percent = eval_percent
         self.n_jobs = n_jobs
         self.seed = seed
-        self.score_parameterization = get_score_parameterization(score_parameterization)
+        self.score_parameterization = get_score_parameterization(
+            score_parameterization,
+            edm_sigma_data=edm_sigma_data,
+        )
         self.noise_feature_builder = get_noise_feature_builder(noise_features)
 
         self._lgbm_args = lgbm_args
@@ -466,8 +600,18 @@ class LightGBMScoreModel(ScoreModel):
         assert self.models is not None
 
         predictions = []
-        predictors = self.noise_feature_builder.make_features(perturbed_y=y, X=X, t=t, sde=self.sde)
         _, std = self.sde.get_mean_std_pt_given_y0(y, t)
+        feature_perturbed_y = self.score_parameterization.make_feature_perturbed_y(
+            perturbed_y=y,
+            std=std,
+        )
+        predictors = self.noise_feature_builder.make_features(
+            perturbed_y=feature_perturbed_y,
+            X=X,
+            t=t,
+            sde=self.sde,
+            std=std,
+        )
         for i in range(y.shape[-1]):
             with warnings.catch_warnings():
                 warnings.filterwarnings(
@@ -480,7 +624,12 @@ class LightGBMScoreModel(ScoreModel):
         predictions = np.array(predictions).T
         predicted_mean = None
         if self.score_parameterization.requires_prediction_mean:
-            predicted_mean, _ = self.sde.get_mean_std_pt_given_y0(predictions, t)
+            prediction_y0 = self.score_parameterization.make_prediction_y0(
+                prediction=predictions,
+                perturbed_y=y,
+                std=std,
+            )
+            predicted_mean, _ = self.sde.get_mean_std_pt_given_y0(prediction_y0, t)
         return self.score_parameterization.reconstruct_score(
             prediction=predictions,
             perturbed_y=y,
@@ -512,6 +661,7 @@ class LightGBMScoreModel(ScoreModel):
         """
         y_dim = y.shape[1]
         self.sde = sde
+        self._warn_on_edm_config(sde)
 
         lgb_X_train, lgb_X_val, lgb_y_train, lgb_y_val, cat_idx = _make_training_data(
             X=X,
@@ -543,3 +693,22 @@ class LightGBMScoreModel(ScoreModel):
 
         # collect the true number of trees learned by each model
         self.n_estimators_true = [model.n_estimators_ for model in self.models]
+
+    def _warn_on_edm_config(self, sde: DiffusionSDE) -> None:
+        if not isinstance(self.score_parameterization, EDMParameterization):
+            return
+        if sde.__class__.__name__ != "VESDE":
+            warnings.warn(
+                "score_parameterization='edm' is an EDM-style x0 reparameterization for "
+                "non-VESDE SDEs; the EDM input/skip coefficients are not Bayes-optimal "
+                "for VPSDE/SubVPSDE marginals.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if self.noise_feature_builder.name == "raw_time":
+            warnings.warn(
+                "score_parameterization='edm' is best paired with noise_features='raw_time_log_std' "
+                "so the regressor receives an explicit log-noise feature.",
+                UserWarning,
+                stacklevel=2,
+            )

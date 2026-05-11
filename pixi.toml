@@ -25,6 +25,7 @@ setup = "pre-commit install"
 test = "pytest"
 lint = "pre-commit run --all-files"
 bench-smoke = "python -m benchmarks.run --config benchmarks/configs/smoke.yaml"
+bench-real = "python -m benchmarks.run --config benchmarks/configs/real_smoke.yaml"
 clean-pixi = "rm -rf .pixi pixi.lock"
 
 [feature.test.dependencies]
@@ -54,6 +55,7 @@ pyyaml = "*"
 [feature.bench.tasks]
 bench-smoke = "python -m benchmarks.run --config benchmarks/configs/smoke.yaml"
 bench-synthetic = "python -m benchmarks.run --config benchmarks/configs/synthetic_core.yaml"
+bench-real = "python -m benchmarks.run --config benchmarks/configs/real_smoke.yaml"
 
 [feature.build.dependencies]
 python-build = "*"

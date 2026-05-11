@@ -76,6 +76,16 @@ variants:
       learning_rate: 0.1
       sde_name: vesde
       verbose: -1
+  - name: edm_raw_time_log_std
+    params:
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
 
 samplers:
   - n_samples: 200

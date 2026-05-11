@@ -2,10 +2,13 @@
 Contains all of the test for the different score model classes.
 """
 
+import warnings
+
 import numpy as np
 import pytest
 from einops import repeat
 
+from treeffuser._score_models import EDMParameterization
 from treeffuser._score_models import LightGBMScoreModel
 from treeffuser._score_models import NoiseParameterization
 from treeffuser._score_models import RawTimeFeatureBuilder
@@ -16,6 +19,7 @@ from treeffuser._score_models import get_noise_feature_builder
 from treeffuser._score_models import get_score_parameterization
 from treeffuser.sde.diffusion_sdes import VESDE
 from treeffuser.sde.diffusion_sdes import VPSDE
+from treeffuser.sde.diffusion_sdes import SubVPSDE
 
 from .utils import generate_bimodal_linear_regression_data
 from .utils import r2_score
@@ -77,6 +81,95 @@ def test_x0_parameterization_reconstructs_score_from_denoised_prediction():
     assert np.allclose(score, expected_score)
 
 
+def test_edm_parameterization_preconditions_denoising_target_and_features():
+    parameterization = EDMParameterization(sigma_data=1.5)
+    y0 = np.array([[1.0, -2.0], [0.5, 4.0]])
+    t = np.array([[0.1], [0.2]])
+    z = np.array([[0.3, -0.4], [1.2, -0.7]])
+    sde = VESDE(hyperparam_min=0.01, hyperparam_max=1.0)
+    mean, std = sde.get_mean_std_pt_given_y0(y0, t)
+    perturbed_y = mean + std * z
+
+    target = parameterization.make_target(
+        y0=y0,
+        perturbed_y=perturbed_y,
+        z=z,
+        mean=mean,
+        std=std,
+        t=t,
+    )
+    feature_y = parameterization.make_feature_perturbed_y(perturbed_y=perturbed_y, std=std)
+    denoised = parameterization.make_prediction_y0(prediction=target, perturbed_y=perturbed_y, std=std)
+    score = parameterization.reconstruct_score(
+        prediction=target,
+        perturbed_y=perturbed_y,
+        std=std,
+        predicted_mean=denoised,
+    )
+
+    sigma_data_sq = parameterization.sigma_data**2
+    denom = std**2 + sigma_data_sq
+    c_skip = sigma_data_sq / denom
+    c_out = std * parameterization.sigma_data / np.sqrt(denom)
+    c_in = 1.0 / np.sqrt(denom)
+
+    assert parameterization.name == "edm"
+    assert get_score_parameterization("edm").name == "edm"
+    assert np.allclose(target, (y0 - c_skip * perturbed_y) / c_out)
+    assert np.allclose(feature_y, c_in * perturbed_y)
+    assert np.allclose(denoised, y0)
+    assert np.allclose(score, (y0 - perturbed_y) / (std**2))
+
+
+@pytest.mark.parametrize(
+    "sde",
+    [
+        VPSDE(hyperparam_min=0.1, hyperparam_max=1.0),
+        SubVPSDE(hyperparam_min=0.1, hyperparam_max=1.0),
+    ],
+)
+def test_edm_parameterization_reconstructs_score_with_non_ve_mean_composition(sde):
+    parameterization = EDMParameterization(sigma_data=1.5)
+    y0 = np.array([[1.0, -2.0], [0.5, 4.0]])
+    t = np.array([[0.1], [0.2]])
+    z = np.array([[0.3, -0.4], [1.2, -0.7]])
+    mean, std = sde.get_mean_std_pt_given_y0(y0, t)
+    perturbed_y = mean + std * z
+    target = parameterization.make_target(
+        y0=y0,
+        perturbed_y=perturbed_y,
+        z=z,
+        mean=mean,
+        std=std,
+        t=t,
+    )
+    denoised = parameterization.make_prediction_y0(
+        prediction=target,
+        perturbed_y=perturbed_y,
+        std=std,
+    )
+    predicted_mean, _ = sde.get_mean_std_pt_given_y0(denoised, t)
+
+    score = parameterization.reconstruct_score(
+        prediction=target,
+        perturbed_y=perturbed_y,
+        std=std,
+        predicted_mean=predicted_mean,
+    )
+
+    assert np.allclose(denoised, y0)
+    assert np.allclose(score, (mean - perturbed_y) / (std**2))
+
+
+def test_edm_parameterization_requires_positive_std():
+    parameterization = EDMParameterization()
+    with pytest.raises(ValueError, match="strictly positive"):
+        parameterization.make_feature_perturbed_y(
+            perturbed_y=np.array([[1.0]]),
+            std=np.array([[0.0]]),
+        )
+
+
 def test_raw_time_feature_builder_matches_concatenation():
     perturbed_y = np.array([[0.1, -0.2], [0.3, 0.4], [-0.5, 0.6]])
     X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
@@ -106,6 +199,20 @@ def test_raw_time_log_std_feature_builder_adds_log_std():
     assert get_noise_feature_builder("raw_time_log_std").name == "raw_time_log_std"
     assert features.shape == expected.shape
     assert features.shape[1] == perturbed_y.shape[1] + X.shape[1] + 2
+    assert np.allclose(features, expected)
+
+
+def test_raw_time_log_std_feature_builder_uses_supplied_std():
+    perturbed_y = np.array([[0.1], [0.3], [-0.5]])
+    X = np.array([[1.0, 2.0], [4.0, 5.0], [7.0, 8.0]])
+    t = np.array([[0.1], [0.5], [0.9]])
+    sde = VESDE(hyperparam_min=0.01, hyperparam_max=1.0)
+    supplied_std = np.array([[0.2], [0.3], [0.4]])
+
+    builder = RawTimeLogStdFeatureBuilder()
+    features = builder.make_features(perturbed_y=perturbed_y, X=X, t=t, sde=sde, std=supplied_std)
+    expected = np.concatenate([perturbed_y, X, t, np.log(supplied_std)], axis=1)
+
     assert np.allclose(features, expected)
 
 
@@ -278,6 +385,65 @@ def test_lightgbm_score_model_with_x0_scores_finite(noise_features):
     assert score_model.score_parameterization.name == "x0"
     assert scores.shape == y.shape
     assert np.all(np.isfinite(scores))
+
+
+def test_lightgbm_score_model_with_edm_scores_finite():
+    n, x_dim = 160, 2
+    rng = np.random.default_rng(2)
+    X = rng.normal(size=(n, x_dim))
+    y = np.column_stack(
+        [
+            X[:, 0] + rng.normal(scale=0.1, size=n),
+            X[:, 0] - X[:, 1] + rng.normal(scale=0.1, size=n),
+        ]
+    )
+    sde = VESDE(hyperparam_min=0.01, hyperparam_max=float(y.std()))
+    score_model = LightGBMScoreModel(
+        score_parameterization="edm",
+        noise_features="raw_time_log_std",
+        verbose=-1,
+        n_estimators=10,
+        learning_rate=0.1,
+        n_repeats=1,
+        eval_percent=None,
+        seed=0,
+    )
+
+    score_model.fit(X, y, sde)
+    t = np.concatenate([np.full((n // 2, 1), 1e-5), np.full((n - n // 2, 1), sde.T * 0.9)])
+    z = rng.normal(size=y.shape)
+    mean, std = sde.get_mean_std_pt_given_y0(y, t)
+    y_perturbed = mean + z * std
+
+    scores = score_model.score(y=y_perturbed, X=X, t=t)
+
+    assert score_model.score_parameterization.name == "edm"
+    assert scores.shape == y.shape
+    assert np.all(np.isfinite(scores))
+
+
+def test_lightgbm_score_model_with_edm_warns_for_non_ve_sde_and_raw_time():
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(80, 2))
+    y = X[:, :1] + rng.normal(scale=0.1, size=(80, 1))
+    score_model = LightGBMScoreModel(
+        score_parameterization="edm",
+        noise_features="raw_time",
+        verbose=-1,
+        n_estimators=5,
+        learning_rate=0.1,
+        n_repeats=1,
+        eval_percent=None,
+        seed=0,
+    )
+
+    with warnings.catch_warnings(record=True) as warnings_record:
+        warnings.simplefilter("always")
+        score_model.fit(X, y, VPSDE(hyperparam_min=0.1, hyperparam_max=1.0))
+
+    messages = [str(item.message) for item in warnings_record]
+    assert any("non-VESDE" in message for message in messages)
+    assert any("raw_time_log_std" in message for message in messages)
 
 
 def test_linear_regression():

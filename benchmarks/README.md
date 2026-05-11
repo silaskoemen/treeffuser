@@ -26,6 +26,7 @@ benchmarks/
   configs/
     smoke.yaml
     synthetic_core.yaml
+    real_smoke.yaml
   results/raw/
 ```
 
@@ -39,6 +40,8 @@ python -m benchmarks.run --config benchmarks/configs/smoke.yaml
 ```
 
 By default, results are written to `benchmarks/results/raw/<config>_<timestamp>.csv`.
+The `real_smoke.yaml` config uses local datasets bundled with scikit-learn, so it does
+not download external benchmark data.
 
 ## Seeding Policy
 

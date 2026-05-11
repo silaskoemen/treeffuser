@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import pairwise
+
 import numpy as np
 from jaxtyping import Float
 
@@ -119,7 +121,7 @@ def coverage_by_x_bin(
         return {"mace": error, "max_error": error}
 
     errors = []
-    for low, high in zip(edges[:-1], edges[1:]):
+    for low, high in pairwise(edges):
         if high == edges[-1]:
             mask = (feature >= low) & (feature <= high)
         else:

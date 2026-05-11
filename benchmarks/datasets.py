@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 from jaxtyping import Float
+from sklearn.datasets import load_diabetes
 
 
 @dataclass(frozen=True)
@@ -23,8 +24,11 @@ def make_dataset(
     seed: int,
     x_dim: int = 3,
 ) -> DatasetBundle:
+    if name in REAL_DATASETS:
+        return REAL_DATASETS[name](n_train=n_train, n_test=n_test, seed=seed)
+
     if name not in DATASETS:
-        available = ", ".join(sorted(DATASETS))
+        available = ", ".join(sorted([*DATASETS, *REAL_DATASETS]))
         raise ValueError(f"Unknown benchmark dataset {name!r}. Available: {available}")
 
     rng = np.random.default_rng(seed)
@@ -119,4 +123,41 @@ DATASETS: dict[str, Callable[[np.ndarray, np.random.Generator], np.ndarray]] = {
     "skewed_noise": _skewed_noise,
     "bimodal_mixture": _bimodal_mixture,
     "correlated_multioutput": _correlated_multioutput,
+}
+
+
+def _diabetes(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    data = load_diabetes()
+    X = data.data
+    y = data.target.reshape(-1, 1)
+    return _split_real_dataset(name="diabetes", X=X, y=y, n_train=n_train, n_test=n_test, seed=seed)
+
+
+def _split_real_dataset(
+    name: str,
+    X: Float[np.ndarray, "batch x_dim"],
+    y: Float[np.ndarray, "batch y_dim"],
+    n_train: int,
+    n_test: int,
+    seed: int,
+) -> DatasetBundle:
+    n_total = n_train + n_test
+    if n_total > X.shape[0]:
+        raise ValueError(f"Dataset {name!r} has {X.shape[0]} rows, but {n_total} were requested.")
+
+    rng = np.random.default_rng(seed)
+    idx = rng.permutation(X.shape[0])[:n_total]
+    X = X[idx]
+    y = y[idx]
+    return DatasetBundle(
+        name=name,
+        X_train=X[:n_train],
+        y_train=y[:n_train],
+        X_test=X[n_train:],
+        y_test=y[n_train:],
+    )
+
+
+REAL_DATASETS = {
+    "diabetes": _diabetes,
 }

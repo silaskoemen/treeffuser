@@ -10,7 +10,8 @@ from typing import Any
 
 from benchmarks.datasets import make_dataset
 from benchmarks.metrics import evaluate_samples
-from benchmarks.variants import Variant, make_variants
+from benchmarks.variants import Variant
+from benchmarks.variants import make_variants
 
 
 @dataclass(frozen=True)
@@ -209,8 +210,8 @@ def _get_n_estimators_true(model):
 
 def _run_git(args: list[str]) -> str:
     try:
-        completed = subprocess.run(  # noqa: S603, S607
-            ["git", *args],
+        completed = subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
             check=True,
             capture_output=True,
             text=True,
