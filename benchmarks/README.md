@@ -184,21 +184,198 @@ Recommendation update: **C** remains the peak-quality config for real tabular da
 it self-tunes via ES on large data and falls back to C on small data via the gate.
 Library defaults remain unchanged for backward compatibility.
 
-### 2026-05-12 PF-ODE / Heun sampler sweep — negative, not adopted
+### 2026-05-13 Conditional-coverage diagnostic — residualization is a difficulty homogenizer
 
-A deterministic probability-flow ODE plus a Heun second-order solver were added behind
-`sampler_method="heun"` + `pf_ode=True`. Step-count sweep at `n_steps ∈ {15, 25, 50, 100}`
-on 8 datasets × 3 seeds, two variants (baseline + winner). See
-`results/raw/pf_ode_sweep__all_20260512_205403.jsonl`. Heun PF-ODE is worse than Euler SDE
-at every step count for both variants: on `residualized_mean_edm_raw_time_log_std`, Euler
-@ 15 steps (CRPS 4.285, I90 err 0.022, time 0.79s) beats Heun PF-ODE @ 100 steps (CRPS
-4.498, I90 err 0.085, time 6.56s) on every metric while running ~8× faster. Likely cause:
-the LightGBM-based score is piecewise-constant in `t` (histogram binning), so Heun's
-predictor-corrector has no smooth drift to average; removing the stochastic term also
-tightens the sampling distribution beyond what the noisy score warrants, dropping
-interval-90 coverage from ~0.89 to ~0.82. This negative result also closes off tree-based
-flow matching as a near-term direction (it was gated on ODE-based sampling winning here).
-The sampler surface is kept for completeness but defaults remain Euler/SDE.
+Follow-up to the conformal head-to-head. Hypothesis to test: split-CQR uses a global
+additive radius and could be marginally calibrated while conditionally miscalibrated;
+if S1's pre-conformal intervals are properly heteroscedastic, S1+conformal should
+hold coverage flatly across difficulty bins where B+conformal fails. New per-bin
+diagnostics added in `benchmarks/metrics.py:binned_coverage_and_crps` and wired
+through `evaluate_samples` (raw) and `harness._conformal_metrics` (conformal). Each
+test row now records, for `bin_by ∈ {iqr, std, crps}` and each coverage level,
+quintile-binned coverage, width, and per-bin CRPS. Re-ran the same conformal
+comparison: see `results/raw/conformal_comparison__all_20260513_110233.jsonl`.
+
+Result: the hypothesis is **rejected, and the actual finding is more interesting.**
+
+1. **Both variants are equally well-calibrated conditionally.** IQR-bin and STD-bin
+   MACE at 90% are within 0.02 of each other on every dataset. Neither B+conformal
+   nor S1+conformal exhibits the "fails on hard bins" failure mode.
+2. **B's predicted uncertainty tracks actual difficulty *better* than S1's.** Ratio
+   (CRPS in IQR-bin5) / (CRPS in IQR-bin1), where bins are defined by each
+   variant's own predicted IQR:
+
+   | Dataset | B | S1 |
+   |---|---:|---:|
+   | diabetes | 1.20 | 0.97 |
+   | california_housing | 3.08 | 2.02 |
+   | kin8nm | 1.34 | 0.99 |
+   | wine_quality_white | 1.25 | 1.00 |
+   | student_t_heavy_tail | 1.63 | 1.29 |
+   | bimodal_mixture | 1.41 | 1.12 |
+
+   S1's ratios are systematically closer to 1 — the mean residualizer absorbs
+   heteroscedasticity into the conditional mean, leaving the diffusion to model
+   roughly homoscedastic residuals and produce roughly uniform predicted IQRs.
+3. **Width-by-difficulty mirrors this.** Post-conformal width ratio bin5/bin1:
+   california 2.53 (B) vs 1.69 (S1); kin8nm 1.32 vs 1.12; student_t 1.75 vs 1.08.
+   B's intervals fan out by predicted difficulty; S1's are roughly uniform.
+4. **The two strategies cost CRPS in different regimes.** On `kin8nm` (S1's clean
+   win), per-bin CRPS shows S1 ties B on easy points and beats B 24% on hard
+   points — the residualizer captured the heteroscedasticity correctly. On
+   `california_housing` and `wine_quality_white` (where B wins marginal CRPS), S1
+   overcautiously inflates easy-point widths without recovering the cost on hard
+   points — the residualizer captured the conditional mean but not the
+   heteroscedasticity it needed to homogenize residual scale.
+
+Reframing: mean residualization is a *difficulty homogenizer*. It helps when it
+captures conditional scale variation (residuals shrink to uniform magnitude
+everywhere) and hurts when it captures only the conditional mean. Pure marginal
+metrics can't separate these regimes — only per-bin diagnostics can.
+
+Implication for the improvement track: the remaining headroom is not in adding
+more model machinery (items #3, #8–#10 from `plans/improvements.md` are all
+off-axis for what's actually happening). The open research question is
+"when does residualization homogenize correctly, and can we detect it in advance?"
+That's a separate workstream.
+
+### 2026-05-13 Conformal head-to-head — model-side win is real but narrow
+
+Direct test of whether the winning combo is genuinely a better density model or
+mostly a better-calibrated one. Two variants — `B_baseline_raw_time` and
+`S1_winning_combo` (EDM + mean residualization + log-σ t-sampling + raw_time_log_std
++ residualizer-C) — run on 8 datasets × 3 seeds with `conformal_cal_fraction=0.5`.
+The harness already supported the wrapper via `_conformal_metrics`; this is the
+first sweep to actually exercise it. See
+`results/raw/conformal_comparison__all_20260513_100933.jsonl`.
+
+Headline (width ratio S1/B at matched conformal coverage; <1 means S1 has a tighter
+learned density at the same coverage level):
+
+| Level | Raw S1/B | Conformal S1/B |
+|------:|---------:|---------------:|
+| Real, 50%  | 1.236 | **0.925** |
+| Real, 80%  | 1.247 | 1.056 |
+| Real, 90%  | 1.223 | 1.096 |
+| Real, 95%  | 1.092 | 0.992 |
+| Synth (50–95%) | 1.02–1.11 | 1.02–1.11 |
+
+Findings:
+1. **Most of S1's raw coverage gain was bought with wider intervals.** Real-data raw
+   width is 22% larger; after conformalizing both, the gap shrinks to 5–10% at
+   80–90%. Conformal alone closes ~75% of the baseline's undercoverage
+   (`baseline+conformal` real |covE|@90 = 0.028 vs `S1+conformal` 0.025).
+2. **S1 learns a genuinely better center.** Real 50% conformal width: S1 is 7.5%
+   narrower. Mean residualization is doing real work on the conditional mode.
+3. **S1's tails are too broad.** Real 80–90% conformal width slightly favors B —
+   the EDM-residualized score spreads more probability mass into the wings than
+   needed.
+4. **kin8nm is the unambiguous win**: 24% narrower conformal width @90, 17% better
+   CRPS, the only dataset where the combo decisively dominates baseline-plus-
+   conformal.
+5. **diabetes is noisy** (n_test=142 → cal=71/eval=71); single dataset where S1
+   is meaningfully wider post-conformal — small-test instability, not a real
+   regression.
+6. **Synthetic regression is not fixable by conformal.** S1's CRPS is 6% worse and
+   conformal width is uniformly wider — this is a property of the combo, not of
+   calibration. Tracked as a known cost.
+
+Interpretation: S1 remains the recommended config for real tabular regression on
+the strength of CRPS (8.32 vs 8.45) and 50%/95% conformal width, but the
+improvement-track narrative needs adjusting — for users whose only goal is interval
+coverage, `baseline + conformal` is a competitive simpler pipeline. The next-step
+candidates from `plans/improvements.md` (#9–#11) are not justified by this evidence;
+the remaining headroom is in heteroscedastic regimes like kin8nm, where the combo
+already wins clearly.
+
+### 2026-05-13 SDE σ_max schedule sweep — null result, σ_max=20 retained
+
+Adaptive σ_max sweep on the new winning combo (EDM + mean residualization + log-σ
+t-sampling + raw_time_log_std + high-capacity residualizer-C). Five variants:
+B baseline_raw_time, S1 σ_max=20 (combo default), S2 `sde_initialize_from_data=True`,
+S3 σ_max=5, S4 σ_max=3. Eight datasets × 3 seeds. See
+`results/raw/sde_schedule_sweep__all_20260512_231259.jsonl`.
+
+Hypothesis: standardized residuals have std≈1, so VESDE σ_max=20 over-covers the data
+scale and wastes transport at the top of the reverse-time trajectory; tighter σ_max
+should concentrate score-model capacity in the useful regime.
+
+Outcome: not confirmed. On real data (mean over 4 sets) all four EDM variants close
+the baseline coverage gap dramatically — I90 abs coverage error drops from 0.068 (B)
+to 0.015 (S1), 0.018 (S2), 0.021 (S3), 0.021 (S4). S1 (σ_max=20) ties or wins on every
+real-data metric; tighter σ_max does not help. S2 (data-adaptive) is statistically
+indistinguishable from S1 and is the safer default if `n` is unknown. On synthetic,
+all EDM variants share a small CRPS regression vs B (0.39 vs 0.37) that is independent
+of σ_max — a property of the combo, not the schedule.
+
+Recommendation: stop tuning σ_max. Keep σ_max=20 for the winning combo (or
+`sde_initialize_from_data=True` as a safer auto-default). Library defaults unchanged.
+
+### 2026-05-13 PF-ODE / Heun sampler sweep (post-fix) — viable sampler, defaults unchanged
+
+Re-run of `pf_ode_sweep.yaml` after the chunked-sampling bug fix. Same config as the
+original (2 variants × 8 datasets × 3 seeds × 8 sampler points), now with valid
+`n_samples=200` for both Euler-SDE and Heun-PF-ODE rows. See
+`results/raw/pf_ode_sweep__all_20260513_115137.jsonl`.
+
+The previous "Heun PF-ODE uniformly worse than Euler" result reverses. With the bug
+fixed, Heun PF-ODE on the winning combo improves substantially over the buggy
+numbers — for example at n_steps=50 on real data, CRPS goes from 8.62 to **8.21**
+and 90% coverage from 0.83 to **0.89**. At matched wall-clock (Heun @ 25 steps ≈
+Euler @ 50 steps, both ~0.65s on the winning combo), the two samplers are
+effectively tied: Euler edges CRPS by 0.7%, Heun edges coverage by 0.011, intervals
+within 3%.
+
+Comparison at matched wall-clock (winning combo, real data):
+
+|                | Euler-SDE @ 50 | Heun-PF-ODE @ 25 |
+|----------------|---------------:|-----------------:|
+| CRPS           | 8.164          | 8.221            |
+| cov@90         | 0.889          | 0.900            |
+| `|covE|`@90    | 0.020          | 0.022            |
+| width@90       | 46.82          | 48.50            |
+| sample time    | 0.65s          | 0.65s            |
+
+Synthetic mirrors this: at n_steps=100, Heun-PF-ODE CRPS=0.371 vs Euler-SDE 0.372 on
+the winning combo — tied. Neither sampler wins decisively on any metric of interest.
+
+Findings:
+1. **Original negative conclusion was bug-driven, not sampler-driven.** Treat the
+   2026-05-12 entry as void; PF-ODE/Heun is a real alternative.
+2. **Defaults stay Euler/SDE.** Per-step cost is ~2× lower for Euler, and the
+   metric ties don't justify changing the default.
+3. **Item #11 (tree-based flow matching) is no longer closed.** It was closed in
+   the original write-up on the basis that ODE sampling failed; that premise is
+   now wrong. Flow matching returns to "research direction" status — not
+   recommended for near-term implementation, but the failure-mode argument no
+   longer applies.
+4. **The PF-ODE surface is justified, not vestigial.** Keep the sampler available
+   for downstream uses (deterministic samples, reproducible quantile estimates,
+   future flow-matching prototype).
+
+### 2026-05-12 PF-ODE / Heun sampler sweep — SUPERSEDED (sampling bug)
+
+The original conclusion below was invalidated on 2026-05-13 by the discovery of a
+chunked-sampling bug in `_base_tabular_diffusion._sample_with_pipeline`: the prior was
+seeded with a constant value across loop iterations, so PF-ODE (which is deterministic
+given the prior + score) produced `n_samples / n_parallel` identical copies of
+`n_parallel` unique samples. The original sweep used `n_samples=200, n_parallel=20`, so
+the effective unique-sample count for PF-ODE rows was 20, not 200. CRPS, coverage, and
+width degrade when effective sample size collapses, so the apparent PF-ODE failure was
+partly an artifact of the bug rather than a property of the sampler. Bug fixed in
+`_base_tabular_diffusion.py` (chunk-indexed seeds for both prior and solver) and
+re-run logged below as "PF-ODE / Heun sampler sweep (post-fix)". Original conclusion
+preserved for traceability:
+
+> A deterministic probability-flow ODE plus a Heun second-order solver were added behind
+> `sampler_method="heun"` + `pf_ode=True`. Step-count sweep at `n_steps ∈ {15, 25, 50, 100}`
+> on 8 datasets × 3 seeds, two variants (baseline + winner). See
+> `results/raw/pf_ode_sweep__all_20260512_205403.jsonl`. Heun PF-ODE is worse than Euler SDE
+> at every step count for both variants: on `residualized_mean_edm_raw_time_log_std`, Euler
+> @ 15 steps (CRPS 4.285, I90 err 0.022, time 0.79s) beats Heun PF-ODE @ 100 steps (CRPS
+> 4.498, I90 err 0.085, time 6.56s) on every metric while running ~8× faster. The negative
+> result was used to close off tree-based flow matching (item #11 from
+> `plans/improvements.md`) — that closure is now also provisional pending the re-run.
 
 ## Provenance
 

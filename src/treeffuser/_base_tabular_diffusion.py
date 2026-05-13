@@ -407,9 +407,10 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         pbar = tqdm(total=n_samples, disable=not verbose)
         while n_samples_sampled < n_samples:
             batch_size_samples = min(n_parallel, n_samples - n_samples_sampled)
+            chunk_seed = seed + n_samples_sampled if seed is not None else None
             y_batch = self.sde.sample_from_theoretical_prior(
                 (batch_size_samples * batch_size_x, y_dim),
-                seed=seed,
+                seed=chunk_seed,
             )
             if x_batched is None or x_batched.shape[0] != batch_size_samples:
                 # Reuse the same batch of x as much as possible
@@ -431,7 +432,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
                 1e-5,
                 n_steps=n_steps,
                 method=sampler_method,
-                seed=seed + n_samples_sampled if seed is not None else None,
+                seed=chunk_seed,
                 score_fn=_score_fn,
                 pf_ode=pf_ode,
             )

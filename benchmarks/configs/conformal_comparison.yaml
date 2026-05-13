@@ -1,0 +1,92 @@
+# Conformal comparison: does the EDM + mean-residualization winning combo retain
+# an advantage over the baseline once both are wrapped in split conformal quantile
+# calibration? Same fit/sample pipeline as prior sweeps; the only new axis is the
+# split-CQR wrapper applied post-sampling via `conformal_cal_fraction`. The wrapper
+# splits the test set into a calibration slice and an evaluation slice, fits the
+# ConformalQuantileCalibrator on the calibration slice, and reports
+# `conformal_interval_{50,80,90,95}_{coverage,width,...}` columns alongside the raw
+# `interval_*` columns. The headline question: at matched coverage, is the
+# combo's interval narrower than baseline's? If yes, the model is genuinely
+# better; if not, most of the reported coverage win was post-hoc-fixable.
+
+seeds: [0, 1, 2]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+# 0.5 keeps cal/eval balanced. Diabetes is the tightest case: n_test=142 -> 71/71.
+conformal_cal_fraction: 0.5
+
+datasets:
+  - name: heteroscedastic_gaussian_linear
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: heteroscedastic_gaussian_nonlinear
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: student_t_heavy_tail
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: bimodal_mixture
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: diabetes
+    n_train: 300
+    n_test: 142
+  - name: california_housing
+    n_train: 500
+    n_test: 300
+  - name: kin8nm
+    n_train: 500
+    n_test: 300
+  - name: wine_quality_white
+    n_train: 500
+    n_test: 300
+
+variants:
+  - name: B_baseline_raw_time
+    params:
+      score_parameterization: noise
+      noise_features: raw_time
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+  - name: S1_winning_combo
+    params:
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_sigma_normal
+      log_sigma_p_mean: -1.2
+      log_sigma_p_std: 1.2
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      sde_hyperparam_min: 0.01
+      sde_hyperparam_max: 20.0
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+
+samplers:
+  - n_samples: 200
+    n_steps: 50
+    n_parallel: 20
+    method: euler
+    pf_ode: false

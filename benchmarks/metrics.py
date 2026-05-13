@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from itertools import pairwise
+from typing import Any
 
 import numpy as np
 from jaxtyping import Float
@@ -9,13 +10,17 @@ DEFAULT_COVERAGE_LEVELS = (0.50, 0.80, 0.90, 0.95)
 VALID_WIDTH_COVERAGE_ERROR_TOLERANCES = (0.01, 0.02)
 
 
+DIFFICULTY_BIN_KEYS = ("iqr", "std", "crps")
+
+
 def evaluate_samples(
     y_samples: Float[np.ndarray, "n_samples batch y_dim"],
     y_true: Float[np.ndarray, "batch y_dim"],
     X_test: Float[np.ndarray, "batch x_dim"],
     coverage_levels: tuple[float, ...] = DEFAULT_COVERAGE_LEVELS,
     n_x_bins: int = 5,
-) -> dict[str, float]:
+    n_difficulty_bins: int = 5,
+) -> dict[str, Any]:
     if y_true.ndim == 1:
         y_true = y_true.reshape(-1, 1)
     if y_samples.ndim == 2:
@@ -23,14 +28,17 @@ def evaluate_samples(
 
     y_mean = y_samples.mean(axis=0)
     residual = y_mean - y_true
+    per_point_crps_vec = per_point_crps(y_samples, y_true)
 
     result = {
-        "crps": crps_ensemble(y_samples, y_true),
+        "crps": float(np.mean(per_point_crps_vec)),
         "rmse": float(np.sqrt(np.mean(residual**2))),
         "mae": float(np.mean(np.abs(residual))),
         "quantile_rmsce": quantile_calibration_error(y_samples, y_true)["rmsce"],
         "quantile_mace": quantile_calibration_error(y_samples, y_true)["mace"],
     }
+
+    bin_keys = difficulty_bin_keys(y_samples, per_point_crps_vec)
 
     for level in coverage_levels:
         coverage_stats = interval_stats(y_samples, y_true, level=level)
@@ -57,7 +65,107 @@ def evaluate_samples(
         result[f"{prefix}_xbin_mace"] = by_bin["mace"]
         result[f"{prefix}_xbin_max_error"] = by_bin["max_error"]
 
+        lower = np.quantile(y_samples, (1.0 - level) / 2.0, axis=0)
+        upper = np.quantile(y_samples, 1.0 - (1.0 - level) / 2.0, axis=0)
+        covered = ((y_true >= lower) & (y_true <= upper)).mean(axis=1)
+        widths = (upper - lower).mean(axis=1)
+        for bin_name, key in bin_keys.items():
+            stats = binned_coverage_and_crps(
+                bin_key=key,
+                covered=covered,
+                widths=widths,
+                per_point_crps_vec=per_point_crps_vec,
+                level=level,
+                n_bins=n_difficulty_bins,
+            )
+            result[f"{prefix}_{bin_name}bin_coverages"] = stats["coverages"]
+            result[f"{prefix}_{bin_name}bin_widths"] = stats["widths"]
+            result[f"{prefix}_{bin_name}bin_crps_means"] = stats["crps_means"]
+            result[f"{prefix}_{bin_name}bin_counts"] = stats["counts"]
+            result[f"{prefix}_{bin_name}bin_mace"] = stats["mace"]
+            result[f"{prefix}_{bin_name}bin_max_error"] = stats["max_error"]
+
     return result
+
+
+def per_point_crps(
+    y_samples: Float[np.ndarray, "n_samples batch y_dim"],
+    y_true: Float[np.ndarray, "batch y_dim"],
+) -> Float[np.ndarray, "batch"]:
+    """Per-test-point CRPS, averaged over y_dim. Same formula as `crps_ensemble`, no batch mean."""
+    samples = np.asarray(y_samples)
+    truth = np.asarray(y_true)
+    if truth.ndim == 1:
+        truth = truth.reshape(-1, 1)
+    mean_abs_error = np.mean(np.abs(samples - truth[None, :, :]), axis=0)
+    sorted_samples = np.sort(samples, axis=0)
+    n_samples = samples.shape[0]
+    weights = 2 * np.arange(1, n_samples + 1).reshape(-1, 1, 1) - n_samples - 1
+    pairwise_abs = 2.0 * np.sum(weights * sorted_samples, axis=0) / (n_samples**2)
+    per_point = mean_abs_error - 0.5 * pairwise_abs
+    return per_point.mean(axis=1)
+
+
+def difficulty_bin_keys(
+    y_samples: Float[np.ndarray, "n_samples batch y_dim"],
+    per_point_crps_vec: Float[np.ndarray, "batch"],
+) -> dict[str, np.ndarray]:
+    """Per-point binning keys averaged over y_dim.
+
+    Two of these — `iqr` (75th-25th sample quantile) and `std` (sample std) — are
+    *predicted-uncertainty* keys derived from `y_samples` alone. The third, `crps`,
+    is *outcome-conditioned*: per-point CRPS depends on `y_true` and therefore
+    measures actual difficulty rather than the model's belief about it. Treat
+    `iqr`/`std`-binned coverage as a calibration diagnostic and `crps`-binned
+    coverage as a failure-mode diagnostic; the two answer different questions."""
+    q25 = np.quantile(y_samples, 0.25, axis=0)
+    q75 = np.quantile(y_samples, 0.75, axis=0)
+    iqr = (q75 - q25).mean(axis=1)
+    std = y_samples.std(axis=0, ddof=1).mean(axis=1)
+    return {"iqr": iqr, "std": std, "crps": per_point_crps_vec}
+
+
+def binned_coverage_and_crps(
+    bin_key: Float[np.ndarray, "batch"],
+    covered: Float[np.ndarray, "batch"],
+    widths: Float[np.ndarray, "batch"],
+    per_point_crps_vec: Float[np.ndarray, "batch"],
+    level: float,
+    n_bins: int,
+) -> dict[str, Any]:
+    """Stratify by `bin_key` (per-point predicted scalar). Report per-bin coverage, width, CRPS."""
+    n = bin_key.shape[0]
+    edges = np.quantile(bin_key, np.linspace(0.0, 1.0, n_bins + 1))
+    edges = np.unique(edges)
+    coverages: list[float] = []
+    widths_out: list[float] = []
+    crps_means: list[float] = []
+    counts: list[int] = []
+    if edges.shape[0] <= 2:
+        coverages.append(float(np.mean(covered)))
+        widths_out.append(float(np.mean(widths)))
+        crps_means.append(float(np.mean(per_point_crps_vec)))
+        counts.append(int(n))
+    else:
+        for low, high in pairwise(edges):
+            if high == edges[-1]:
+                mask = (bin_key >= low) & (bin_key <= high)
+            else:
+                mask = (bin_key >= low) & (bin_key < high)
+            if np.any(mask):
+                coverages.append(float(np.mean(covered[mask])))
+                widths_out.append(float(np.mean(widths[mask])))
+                crps_means.append(float(np.mean(per_point_crps_vec[mask])))
+                counts.append(int(np.sum(mask)))
+    errors = [abs(c - level) for c in coverages]
+    return {
+        "coverages": coverages,
+        "widths": widths_out,
+        "crps_means": crps_means,
+        "counts": counts,
+        "mace": float(np.mean(errors)),
+        "max_error": float(np.max(errors)),
+    }
 
 
 def crps_ensemble(

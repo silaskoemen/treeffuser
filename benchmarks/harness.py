@@ -13,7 +13,10 @@ import numpy as np
 
 from benchmarks.datasets import make_dataset
 from benchmarks.metrics import DEFAULT_COVERAGE_LEVELS
+from benchmarks.metrics import binned_coverage_and_crps
+from benchmarks.metrics import difficulty_bin_keys
 from benchmarks.metrics import evaluate_samples
+from benchmarks.metrics import per_point_crps
 from benchmarks.variants import Variant
 from benchmarks.variants import make_variants
 from treeffuser._conformal import ConformalQuantileCalibrator
@@ -178,11 +181,19 @@ def _conformal_metrics(
     y_cal = y_test[cal_idx]
     y_eval = y_test[eval_idx]
 
+    if samples_eval.ndim == 2:
+        samples_eval_3d = samples_eval[:, :, None]
+    else:
+        samples_eval_3d = samples_eval
+    y_eval_2d = y_eval.reshape(-1, 1) if y_eval.ndim == 1 else y_eval
+    per_point_crps_eval = per_point_crps(samples_eval_3d, y_eval_2d)
+    bin_keys = difficulty_bin_keys(samples_eval_3d, per_point_crps_eval)
+
     out: dict[str, Any] = {"conformal_n_cal": int(n_cal), "conformal_n_eval": int(n - n_cal)}
     for level in DEFAULT_COVERAGE_LEVELS:
         cal = ConformalQuantileCalibrator(level=level).fit_from_samples(samples_cal, y_cal)
         lower, upper = cal.predict_interval_from_samples(samples_eval)
-        covered = (y_eval >= lower) & (y_eval <= upper)
+        covered = (y_eval_2d >= lower) & (y_eval_2d <= upper)
         coverage = float(np.mean(covered))
         width = float(np.mean(upper - lower))
         prefix = f"conformal_interval_{int(level * 100)}"
@@ -192,6 +203,24 @@ def _conformal_metrics(
         out[f"{prefix}_width"] = width
         radius = cal.radius
         out[f"{prefix}_cal_radius"] = float(np.mean(radius)) if radius is not None else None
+
+        covered_pp = covered.mean(axis=1)
+        widths_pp = (upper - lower).mean(axis=1)
+        for bin_name, key in bin_keys.items():
+            stats = binned_coverage_and_crps(
+                bin_key=key,
+                covered=covered_pp,
+                widths=widths_pp,
+                per_point_crps_vec=per_point_crps_eval,
+                level=level,
+                n_bins=5,
+            )
+            out[f"{prefix}_{bin_name}bin_coverages"] = stats["coverages"]
+            out[f"{prefix}_{bin_name}bin_widths"] = stats["widths"]
+            out[f"{prefix}_{bin_name}bin_crps_means"] = stats["crps_means"]
+            out[f"{prefix}_{bin_name}bin_counts"] = stats["counts"]
+            out[f"{prefix}_{bin_name}bin_mace"] = stats["mace"]
+            out[f"{prefix}_{bin_name}bin_max_error"] = stats["max_error"]
     return out
 
 
