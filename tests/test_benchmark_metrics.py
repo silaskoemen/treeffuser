@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from benchmarks.harness import _make_sampler_configs
 from benchmarks.metrics import evaluate_samples
 
 
@@ -30,3 +31,28 @@ def test_evaluate_samples_reports_abs_coverage_error_and_valid_widths():
 
     assert metrics["interval_95_coverage_error"] == pytest.approx(0.05)
     assert metrics["interval_95_abs_coverage_error"] == pytest.approx(0.05)
+
+
+def test_make_sampler_configs_preserves_optional_variant_filter():
+    configs = _make_sampler_configs(
+        [
+            {
+                "n_samples": 10,
+                "n_steps": 5,
+                "n_parallel": 2,
+                "method": "heun",
+                "pf_ode": True,
+                "variants": ["score_a", "score_b"],
+            },
+            {
+                "n_samples": 10,
+                "n_steps": 5,
+                "n_parallel": 2,
+                "method": "heun",
+                "pf_ode": False,
+            },
+        ]
+    )
+
+    assert configs[0].variants == ("score_a", "score_b")
+    assert configs[1].variants is None

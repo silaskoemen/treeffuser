@@ -36,6 +36,8 @@ class SamplerConfig:
     n_parallel: int
     method: str = "euler"
     pf_ode: bool = False
+    velocity_stochasticity: float = 0.0
+    variants: tuple[str, ...] | None = None
 
 
 def run_benchmark(config: dict[str, Any], output_path: Path, output_format: str = "jsonl") -> None:
@@ -67,6 +69,8 @@ def run_benchmark(config: dict[str, Any], output_path: Path, output_format: str 
                     model_seed=resolved_seeds.model_seed,
                 )
                 for sampler_config in sampler_configs:
+                    if sampler_config.variants is not None and variant.name not in sampler_config.variants:
+                        continue
                     row = evaluate_variant(
                         model=model,
                         variant=variant,
@@ -114,6 +118,7 @@ def evaluate_variant(
         verbose=False,
         sampler_method=sampler_config.method,
         pf_ode=sampler_config.pf_ode,
+        velocity_stochasticity=sampler_config.velocity_stochasticity,
     )
     sample_time = time.perf_counter() - start
 
@@ -137,6 +142,7 @@ def evaluate_variant(
         "n_parallel": sampler_config.n_parallel,
         "sampler_method": sampler_config.method,
         "sampler_pf_ode": sampler_config.pf_ode,
+        "sampler_velocity_stochasticity": sampler_config.velocity_stochasticity,
         "fit_time": fit_time,
         "sample_time": sample_time,
         "training_rows": training_rows,
@@ -287,6 +293,8 @@ def _make_sampler_configs(config: list[dict[str, Any]]) -> list[SamplerConfig]:
             n_parallel=int(item.get("n_parallel", 10)),
             method=str(item.get("method", "euler")),
             pf_ode=bool(item.get("pf_ode", False)),
+            velocity_stochasticity=float(item.get("velocity_stochasticity", 0.0)),
+            variants=tuple(item["variants"]) if "variants" in item else None,
         )
         for item in config
     ]

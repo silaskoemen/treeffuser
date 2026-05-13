@@ -13,10 +13,14 @@ from sklearn.base import BaseEstimator
 from sklearn.neighbors import KernelDensity
 from tqdm import tqdm
 
+from treeffuser._flow_matching import ReverseVelocityInterpolant
+from treeffuser._flow_matching import ReverseVelocityODE
+from treeffuser._flow_matching import linear_stochasticity_schedule
 from treeffuser._residualizer import ConditionalResidualizer
 from treeffuser._residualizer import ResidualizeMode
 from treeffuser._scaler import ScalerMixedTypes
 from treeffuser._score_models import ScoreModel
+from treeffuser._score_models import VelocityModel
 from treeffuser._warnings import ConvergenceWarning
 from treeffuser.sde import DiffusionSDE
 from treeffuser.sde import sdeint
@@ -99,6 +103,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         self.residualize_k_folds = residualize_k_folds
         self.extra_residualizer_params = extra_residualizer_params or {}
         self.score_model = None
+        self.velocity_model = None
         self._residualizer = None
         self._is_fitted = False
         self._x_dataframe_columns = None
@@ -118,6 +123,12 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
     def get_new_score_model(self) -> ScoreModel:
         """
         Return the score model.
+        """
+
+    @abc.abstractmethod
+    def get_new_velocity_model(self) -> VelocityModel:
+        """
+        Return the velocity model used for flow matching.
         """
 
     def _preprocess_and_validate_data(
@@ -264,8 +275,13 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         The method handles 2D inputs (["batch x_dim"], ["batch y_dim"]) by convention,
         but also works with 1D inputs (["batch"]) for single-dimensional data.
         """
-        self.sde = self.get_new_sde()
-        self.score_model = self.get_new_score_model()
+        training_objective = getattr(self, "training_objective", "score")
+        if training_objective not in {"score", "flow_matching"}:
+            raise ValueError("training_objective must be 'score' or 'flow_matching'.")
+
+        self.sde = self.get_new_sde() if training_objective == "score" else None
+        self.score_model = self.get_new_score_model() if training_objective == "score" else None
+        self.velocity_model = self.get_new_velocity_model() if training_objective == "flow_matching" else None
         self._x_scaler = ScalerMixedTypes()
         self._y_scaler = ScalerMixedTypes()
         self._residualizer = None
@@ -294,9 +310,15 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
                 cat_idx=cat_idx,
             )
 
-        if self.sde_initialize_from_data:
-            self.sde.initialize_hyperparams_from_data(y_for_diffusion)
-        self.score_model.fit(x_transformed, y_for_diffusion, self.sde, cat_idx)
+        if training_objective == "score":
+            assert self.sde is not None
+            assert self.score_model is not None
+            if self.sde_initialize_from_data:
+                self.sde.initialize_hyperparams_from_data(y_for_diffusion)
+            self.score_model.fit(x_transformed, y_for_diffusion, self.sde, cat_idx)
+        else:
+            assert self.velocity_model is not None
+            self.velocity_model.fit(x_transformed, y_for_diffusion, cat_idx)
 
         self._is_fitted = True
         return self
@@ -311,6 +333,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         verbose: bool = False,
         sampler_method: str = "euler",
         pf_ode: bool = False,
+        velocity_stochasticity: float = 0.0,
     ) -> Float[ndarray, "n_samples batch y_dim"]:
         """
         Sample responses from the diffusion model conditional on the given input data `X`.
@@ -337,6 +360,14 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
             When True, sample from the deterministic probability-flow ODE associated
             with the diffusion SDE instead of the stochastic reverse SDE. Best paired
             with `sampler_method="heun"`. Default is False.
+        velocity_stochasticity : float, optional
+            Stochasticity strength for flow-matching sampling. Only meaningful when
+            `training_objective="flow_matching"`. 0.0 (default) keeps the existing
+            deterministic reverse-velocity ODE; positive values switch to the
+            stochastic-interpolant SDE with schedule `ε(t) = velocity_stochasticity * t`,
+            which preserves the implied marginal at every t and can broaden the
+            sampling distribution to improve coverage at the cost of more sample-time
+            steps. Raises if set non-zero under `training_objective="score"`.
 
         Returns
         -------
@@ -368,6 +399,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
             verbose=verbose,
             sampler_method=sampler_method,
             pf_ode=pf_ode,
+            velocity_stochasticity=velocity_stochasticity,
         )
 
         # Ensure output aligns with original shape provided by user
@@ -386,16 +418,21 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         verbose: bool = False,
         sampler_method: str = "euler",
         pf_ode: bool = False,
+        velocity_stochasticity: float = 0.0,
     ) -> Float[ndarray, "n_samples batch y_dim"]:
         """
         Sampling method that preserves shape conventions.
         """
         assert self._x_scaler is not None
-        assert self.sde is not None
-        assert self.score_model is not None
         assert self._y_dim is not None
         assert self._y_scaler is not None
-        score_model = self.score_model
+        training_objective = getattr(self, "training_objective", "score")
+        if training_objective not in {"score", "flow_matching"}:
+            raise ValueError("training_objective must be 'score' or 'flow_matching'.")
+        if velocity_stochasticity < 0:
+            raise ValueError("velocity_stochasticity must be non-negative.")
+        if velocity_stochasticity > 0 and training_objective != "flow_matching":
+            raise ValueError("velocity_stochasticity is only valid for training_objective='flow_matching'.")
         x_transformed = self._x_scaler.transform(X)
         batch_size_x = x_transformed.shape[0]
         y_dim = self._y_dim
@@ -408,34 +445,70 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         while n_samples_sampled < n_samples:
             batch_size_samples = min(n_parallel, n_samples - n_samples_sampled)
             chunk_seed = seed + n_samples_sampled if seed is not None else None
-            y_batch = self.sde.sample_from_theoretical_prior(
-                (batch_size_samples * batch_size_x, y_dim),
-                seed=chunk_seed,
-            )
-            if x_batched is None or x_batched.shape[0] != batch_size_samples:
+            if x_batched is None or x_batched.shape[0] != batch_size_samples * batch_size_x:
                 # Reuse the same batch of x as much as possible
                 x_batched = np.tile(x_transformed, [batch_size_samples, 1])
 
-            def _score_fn(y, t):
-                return score_model.score(y=y, X=x_batched, t=t)  # noqa: B023
-                # B023 highlights that x_batched might change in the future. But we
-                # use _score_fn immediately inside the loop, so there are no risks.
+            if training_objective == "score":
+                assert self.sde is not None
+                assert self.score_model is not None
+                score_model = self.score_model
+                y_batch = self.sde.sample_from_theoretical_prior(
+                    (batch_size_samples * batch_size_x, y_dim),
+                    seed=chunk_seed,
+                )
 
-            # Reverse-integrate down to a small positive sigma_min to keep the score
-            # well-defined at the data-distribution boundary. This matches the EPS
-            # used when generating training perturbations and is required by the
-            # Heun corrector, which evaluates the drift at the step's endpoint.
-            y_batch_samples = sdeint(
-                self.sde,
-                y_batch,
-                self.sde.T,
-                1e-5,
-                n_steps=n_steps,
-                method=sampler_method,
-                seed=chunk_seed,
-                score_fn=_score_fn,
-                pf_ode=pf_ode,
-            )
+                def _score_fn(y, t):
+                    return score_model.score(y=y, X=x_batched, t=t)  # noqa: B023
+                    # B023 highlights that x_batched might change in the future. But we
+                    # use _score_fn immediately inside the loop, so there are no risks.
+
+                # Reverse-integrate down to a small positive sigma_min to keep the score
+                # well-defined at the data-distribution boundary. This matches the EPS
+                # used when generating training perturbations and is required by the
+                # Heun corrector, which evaluates the drift at the step's endpoint.
+                y_batch_samples = sdeint(
+                    self.sde,
+                    y_batch,
+                    self.sde.T,
+                    1e-5,
+                    n_steps=n_steps,
+                    method=sampler_method,
+                    seed=chunk_seed,
+                    score_fn=_score_fn,
+                    pf_ode=pf_ode,
+                )
+            else:
+                if pf_ode:
+                    raise ValueError("pf_ode=True is only valid for score-based sampling.")
+                assert self.velocity_model is not None
+                velocity_model = self.velocity_model
+                y_batch = velocity_model.sample_prior(
+                    (batch_size_samples * batch_size_x, y_dim),
+                    seed=chunk_seed,
+                )
+
+                def _velocity_fn(y, t):
+                    return velocity_model.velocity(y=y, X=x_batched, t=t)  # noqa: B023
+
+                if velocity_stochasticity > 0:
+                    reverse_dynamics = ReverseVelocityInterpolant(
+                        velocity_fn=_velocity_fn,
+                        flow_path=velocity_model.flow_path,
+                        stochasticity_schedule=linear_stochasticity_schedule(velocity_stochasticity),
+                        t_reverse_origin=1.0,
+                    )
+                else:
+                    reverse_dynamics = ReverseVelocityODE(velocity_fn=_velocity_fn, t_reverse_origin=1.0)
+                y_batch_samples = sdeint(
+                    reverse_dynamics,
+                    y_batch,
+                    0.0,
+                    1.0 - 1e-5,
+                    n_steps=n_steps,
+                    method=sampler_method,
+                    seed=chunk_seed,
+                )
             n_samples_sampled += batch_size_samples
             y_samples.append(y_batch_samples)
             pbar.update(batch_size_samples)

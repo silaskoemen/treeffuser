@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import warnings
 from typing import Literal
 
 from treeffuser._base_tabular_diffusion import BaseTabularDiffusion
 from treeffuser._residualizer import ResidualizeMode
 from treeffuser._score_models import LightGBMScoreModel
+from treeffuser._score_models import LightGBMVelocityModel
 from treeffuser._score_models import ScoreModel
+from treeffuser._score_models import VelocityModel
 from treeffuser.sde import DiffusionSDE
 from treeffuser.sde import get_diffusion_sde
 
@@ -30,6 +33,8 @@ class Treeffuser(BaseTabularDiffusion):
         sde_initialize_from_data: bool = False,
         sde_hyperparam_min: float | Literal["default"] | None = None,
         sde_hyperparam_max: float | Literal["default"] | None = None,
+        training_objective: Literal["score", "flow_matching"] = "score",
+        flow_path: str = "linear",
         score_parameterization: str = "noise",
         noise_features: str = "raw_time",
         edm_sigma_data: float = 1.0,
@@ -89,6 +94,12 @@ class Treeffuser(BaseTabularDiffusion):
             SDE: The scale of the SDE at t=0 (see `VESDE`, `VPSDE`, `SubVPSDE`).
         sde_hyperparam_max : float or "default"
             SDE: The scale of the SDE at t=T (see `VESDE`, `VPSDE`, `SubVPSDE`).
+        training_objective : {"score", "flow_matching"}
+            Objective used to train the generative model. "score" preserves the existing
+            score-SDE behavior. "flow_matching" trains a direct velocity field and uses
+            deterministic reverse-velocity ODE sampling.
+        flow_path : {"linear"}
+            Probability path used when `training_objective="flow_matching"`.
         score_parameterization : str
             Score-model regression target and score reconstruction strategy. Currently supported:
             "noise", "x0", and "edm".
@@ -154,6 +165,8 @@ class Treeffuser(BaseTabularDiffusion):
         self.sde_initialize_from_data = sde_initialize_from_data
         self.sde_hyperparam_min = sde_hyperparam_min
         self.sde_hyperparam_max = sde_hyperparam_max
+        self.training_objective = training_objective
+        self.flow_path = flow_path
         self.score_parameterization = score_parameterization
         self.noise_features = noise_features
         self.edm_sigma_data = edm_sigma_data
@@ -166,6 +179,7 @@ class Treeffuser(BaseTabularDiffusion):
         self.residualize_k_folds = residualize_k_folds
         self.extra_lightgbm_params = extra_lightgbm_params or {}
         self.extra_residualizer_params = extra_residualizer_params or {}
+        self._warn_on_flow_matching_ignored_params()
 
     def get_new_sde(self) -> DiffusionSDE:
         sde_cls = get_diffusion_sde(self.sde_name)
@@ -177,6 +191,40 @@ class Treeffuser(BaseTabularDiffusion):
             sde_kwargs["hyperparam_max"] = self.sde_hyperparam_max
         sde = sde_cls(**sde_kwargs)
         return sde
+
+    def _warn_on_flow_matching_ignored_params(self) -> None:
+        if self.training_objective != "flow_matching":
+            return
+        ignored_params = []
+        if self.sde_name != "vesde":
+            ignored_params.append("sde_name")
+        if self.sde_initialize_from_data is not False:
+            ignored_params.append("sde_initialize_from_data")
+        if self.sde_hyperparam_min is not None:
+            ignored_params.append("sde_hyperparam_min")
+        if self.sde_hyperparam_max is not None:
+            ignored_params.append("sde_hyperparam_max")
+        if self.score_parameterization != "noise":
+            ignored_params.append("score_parameterization")
+        if self.edm_sigma_data != 1.0:
+            ignored_params.append("edm_sigma_data")
+        if self.loss_weighting != "uniform":
+            ignored_params.append("loss_weighting")
+        if self.min_snr_gamma != 5.0:
+            ignored_params.append("min_snr_gamma")
+        if self.t_sampling != "uniform":
+            ignored_params.append("t_sampling")
+        if self.log_sigma_p_mean != -1.2:
+            ignored_params.append("log_sigma_p_mean")
+        if self.log_sigma_p_std != 1.2:
+            ignored_params.append("log_sigma_p_std")
+        if not ignored_params:
+            return
+        warnings.warn(
+            "training_objective='flow_matching' ignores score/SDE-only parameters: " f"{', '.join(ignored_params)}.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     def get_new_score_model(self) -> ScoreModel:
         score_model = LightGBMScoreModel(
@@ -207,12 +255,39 @@ class Treeffuser(BaseTabularDiffusion):
         )
         return score_model
 
+    def get_new_velocity_model(self) -> VelocityModel:
+        velocity_model = LightGBMVelocityModel(
+            n_repeats=self.n_repeats,
+            n_estimators=self.n_estimators,
+            eval_percent=self.eval_percent,
+            early_stopping_rounds=self.early_stopping_rounds,
+            num_leaves=self.num_leaves,
+            max_depth=self.max_depth,
+            learning_rate=self.learning_rate,
+            max_bin=self.max_bin,
+            subsample_for_bin=self.subsample_for_bin,
+            min_child_samples=self.min_child_samples,
+            subsample=self.subsample,
+            subsample_freq=self.subsample_freq,
+            verbose=self.verbose,
+            seed=self.seed,
+            n_jobs=self.n_jobs,
+            flow_path=self.flow_path,
+            noise_features=self.noise_features,
+            **self.extra_lightgbm_params,
+        )
+        return velocity_model
+
     @property
     def n_estimators_true(self) -> list[int]:
         """
         The number of estimators that are actually used in the models (after early stopping),
-        one for each dimension of the score (i.e. the dimension of y).
+        one for each dimension of the learned score or velocity (i.e. the dimension of y).
         """
+        if self.training_objective == "flow_matching":
+            assert isinstance(self.velocity_model, LightGBMVelocityModel)
+            assert self.velocity_model.n_estimators_true is not None
+            return self.velocity_model.n_estimators_true
         assert isinstance(self.score_model, LightGBMScoreModel)
         assert self.score_model.n_estimators_true is not None
         return self.score_model.n_estimators_true

@@ -13,6 +13,8 @@ from jaxtyping import Float
 from jaxtyping import Int
 from sklearn.model_selection import train_test_split
 
+from treeffuser._flow_matching import FlowPath
+from treeffuser._flow_matching import get_flow_path
 from treeffuser.sde import DiffusionSDE
 
 ###################################################
@@ -482,6 +484,8 @@ def get_loss_weighting(
 # Smallest t we ever sample. Matches the EPS used historically in `_make_training_data`
 # and the reverse-time integration endpoint in `_base_tabular_diffusion.sample`.
 _T_SAMPLER_EPS = 1e-5
+_FLOW_MATCHING_T_EPS = _T_SAMPLER_EPS
+_FLOW_MATCHING_ENDPOINT_FRACTION = 0.05
 
 
 class TSampler(abc.ABC):
@@ -781,6 +785,82 @@ def _make_training_data(
     )
 
 
+def _sample_flow_matching_t(n: int, rng: np.random.Generator) -> Float[np.ndarray, "n 1"]:
+    t = rng.uniform(_FLOW_MATCHING_T_EPS, 1.0, size=(n, 1))
+    endpoint_count = max(1, round(n * _FLOW_MATCHING_ENDPOINT_FRACTION)) if n > 0 else 0
+    if endpoint_count > 0:
+        endpoint_idx = rng.choice(n, size=endpoint_count, replace=False)
+        t[endpoint_idx] = 1.0
+    return t
+
+
+def _make_flow_matching_training_data(
+    X: Float[np.ndarray, "batch x_dim"],
+    y: Float[np.ndarray, "batch y_dim"],
+    flow_path: FlowPath,
+    n_repeats: int | None,
+    eval_percent: float | None,
+    cat_idx: list[int] | None = None,
+    seed: int | None = None,
+    noise_feature_builder: NoiseFeatureBuilder | None = None,
+):
+    """
+    Creates LightGBM training rows for linear flow matching.
+
+    The validation split is made on original `(X, y0)` rows before repeats and
+    prior-noise draws, matching `_make_training_data` and avoiding leakage between
+    noisy views of the same data point.
+    """
+    if noise_feature_builder is None:
+        noise_feature_builder = RawTimeFeatureBuilder()
+    rng = np.random.default_rng(seed)
+
+    X_train, X_test, y_train, y_test = X, None, y, None
+    predictors_val = None
+    predicted_val = None
+
+    if eval_percent is not None:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=eval_percent, random_state=seed)
+
+    n_reps = n_repeats if n_repeats is not None else 1
+    X_train = np.tile(X_train, (n_reps, 1))
+    y_train = np.tile(y_train, (n_reps, 1))
+    t_train = _sample_flow_matching_t(y_train.shape[0], rng)
+    z_train = flow_path.sample_prior(y_train.shape, rng=rng)
+    y_t_train = flow_path.interpolate(y0=y_train, z=z_train, t=t_train)
+    predictors_train = noise_feature_builder.make_features(
+        perturbed_y=y_t_train,
+        X=X_train,
+        t=t_train,
+        sde=cast(DiffusionSDE, None),
+    )
+    predicted_train = flow_path.target_velocity(y0=y_train, z=z_train, t=t_train)
+
+    if eval_percent is not None:
+        assert y_test is not None
+        assert X_test is not None
+        t_val = _sample_flow_matching_t(y_test.shape[0], rng)
+        z_val = flow_path.sample_prior(y_test.shape, rng=rng)
+        y_t_val = flow_path.interpolate(y0=y_test, z=z_val, t=t_val)
+        predictors_val = noise_feature_builder.make_features(
+            perturbed_y=y_t_val,
+            X=X_test,
+            t=t_val,
+            sde=cast(DiffusionSDE, None),
+        )
+        predicted_val = flow_path.target_velocity(y0=y_test, z=z_val, t=t_val)
+
+    cat_idx = [c + y_train.shape[1] for c in cat_idx] if cat_idx is not None else None
+
+    return (
+        predictors_train,
+        predictors_val,
+        predicted_train,
+        predicted_val,
+        cat_idx,
+    )
+
+
 ###################################################
 # Score models
 ###################################################
@@ -803,6 +883,36 @@ class ScoreModel(abc.ABC):
         X: Float[np.ndarray, "batch x_dim"],
         y: Float[np.ndarray, "batch y_dim"],
         sde: DiffusionSDE,
+        cat_idx: list[int] | None = None,
+    ):
+        pass
+
+
+class VelocityModel(abc.ABC):
+    flow_path: FlowPath
+
+    @abc.abstractmethod
+    def sample_prior(
+        self,
+        shape: tuple[int, ...],
+        seed: int | None = None,
+    ) -> Float[np.ndarray, "*shape"]:
+        pass
+
+    @abc.abstractmethod
+    def velocity(
+        self,
+        y: Float[np.ndarray, "batch y_dim"],
+        X: Float[np.ndarray, "batch x_dim"],
+        t: Int[np.ndarray, "batch 1"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        pass
+
+    @abc.abstractmethod
+    def fit(
+        self,
+        X: Float[np.ndarray, "batch x_dim"],
+        y: Float[np.ndarray, "batch y_dim"],
         cat_idx: list[int] | None = None,
     ):
         pass
@@ -1008,3 +1118,112 @@ class LightGBMScoreModel(ScoreModel):
                 UserWarning,
                 stacklevel=2,
             )
+
+
+class LightGBMVelocityModel(VelocityModel):
+    """
+    A LightGBM model that approximates a flow-matching velocity field.
+
+    The learned object is `velocity(y_t, X, t)`, not a score. Sampling should use a
+    deterministic reverse-velocity ODE rather than the reverse-SDE/PF-ODE wrappers.
+    """
+
+    def __init__(
+        self,
+        n_repeats: int | None = 10,
+        eval_percent: float = 0.1,
+        n_jobs: int | None = -1,
+        seed: int | None = None,
+        flow_path: str | FlowPath = "linear",
+        noise_features: str | NoiseFeatureBuilder = "raw_time",
+        verbose: int = 0,
+        **lgbm_args,
+    ) -> None:
+        self.n_repeats = n_repeats
+        self.eval_percent = eval_percent
+        self.n_jobs = n_jobs
+        self.seed = seed
+        self.flow_path = get_flow_path(flow_path)
+        self.noise_feature_builder = get_noise_feature_builder(noise_features)
+        if not isinstance(self.noise_feature_builder, RawTimeFeatureBuilder):
+            raise ValueError("Flow matching currently supports only noise_features='raw_time'.")
+        self.verbose = verbose
+        self._lgbm_args = lgbm_args
+        self.models = None
+        self.n_estimators_true = None
+
+    def sample_prior(
+        self,
+        shape: tuple[int, ...],
+        seed: int | None = None,
+    ) -> Float[np.ndarray, "*shape"]:
+        return self.flow_path.sample_prior(shape, seed=seed)
+
+    def velocity(
+        self,
+        y: Float[np.ndarray, "batch y_dim"],
+        X: Float[np.ndarray, "batch x_dim"],
+        t: Int[np.ndarray, "batch 1"],
+    ) -> Float[np.ndarray, "batch y_dim"]:
+        if self.models is None:
+            raise ValueError("The model has not been fitted yet.")
+
+        predictors = self.noise_feature_builder.make_features(
+            perturbed_y=y,
+            X=X,
+            t=t,
+            sde=cast(DiffusionSDE, None),
+        )
+        predictions = []
+        for i in range(y.shape[-1]):
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="X does not have valid feature names.*",
+                    category=UserWarning,
+                )
+                prediction_i = self.models[i].predict(predictors, num_threads=self.n_jobs)
+            predictions.append(prediction_i)
+        return np.array(predictions).T
+
+    def fit(
+        self,
+        X: Float[np.ndarray, "batch x_dim"],
+        y: Float[np.ndarray, "batch y_dim"],
+        cat_idx: list[int] | None = None,
+    ):
+        y_dim = y.shape[1]
+        (
+            lgb_X_train,
+            lgb_X_val,
+            lgb_y_train,
+            lgb_y_val,
+            cat_idx,
+        ) = _make_flow_matching_training_data(
+            X=X,
+            y=y,
+            flow_path=self.flow_path,
+            n_repeats=self.n_repeats,
+            eval_percent=self.eval_percent,
+            cat_idx=cat_idx,
+            seed=self.seed,
+            noise_feature_builder=self.noise_feature_builder,
+        )
+
+        models = []
+        for i in range(y_dim):
+            lgb_y_val_i = lgb_y_val[:, i] if lgb_y_val is not None else None
+            velocity_model_i = _fit_one_lgbm_model(
+                X=lgb_X_train,
+                y=lgb_y_train[:, i],
+                X_val=lgb_X_val,
+                y_val=lgb_y_val_i,
+                cat_idx=cat_idx,
+                seed=self.seed,
+                verbose=self.verbose,
+                n_jobs=self.n_jobs,
+                **self._lgbm_args,
+            )
+            models.append(velocity_model_i)
+        self.models = models
+        self.n_estimators_true = [model.n_estimators_ for model in self.models]

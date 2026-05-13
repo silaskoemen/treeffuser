@@ -1,0 +1,208 @@
+# Experimental flow-matching sweep. Compares the direct velocity objective against
+# score-based deterministic PF-ODE baselines with comparable LightGBM budgets.
+
+seeds: [0, 1, 2]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  - name: heteroscedastic_gaussian_linear
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: heteroscedastic_gaussian_nonlinear
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: student_t_heavy_tail
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: bimodal_mixture
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: diabetes
+    n_train: 300
+    n_test: 142
+  - name: california_housing
+    n_train: 500
+    n_test: 300
+  - name: kin8nm
+    n_train: 500
+    n_test: 300
+  - name: wine_quality_white
+    n_train: 500
+    n_test: 300
+
+variants:
+  - name: baseline_noise
+    params:
+      training_objective: score
+      score_parameterization: noise
+      noise_features: raw_time
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+  - name: residualized_mean_edm_raw_time_log_std
+    params:
+      training_objective: score
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+  - name: residualized_mean_edm_logsigma_resC
+    params:
+      training_objective: score
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_sigma_normal
+      log_sigma_p_mean: -1.2
+      log_sigma_p_std: 1.2
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      sde_hyperparam_max: 20.0
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: linear_fm_raw_time
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+  - name: linear_fm_residualized_mean_raw_time
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+
+samplers:
+  - n_samples: 200
+    n_steps: 5
+    n_parallel: 20
+    method: euler
+    pf_ode: false
+    variants: [baseline_noise]
+  - n_samples: 200
+    n_steps: 10
+    n_parallel: 20
+    method: euler
+    pf_ode: false
+    variants: [baseline_noise]
+  - n_samples: 200
+    n_steps: 15
+    n_parallel: 20
+    method: euler
+    pf_ode: false
+    variants: [baseline_noise]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: euler
+    pf_ode: false
+    variants: [baseline_noise]
+  - n_samples: 200
+    n_steps: 50
+    n_parallel: 20
+    method: euler
+    pf_ode: false
+    variants: [baseline_noise]
+  - n_samples: 200
+    n_steps: 5
+    n_parallel: 20
+    method: heun
+    pf_ode: true
+    variants: [baseline_noise, residualized_mean_edm_raw_time_log_std, residualized_mean_edm_logsigma_resC]
+  - n_samples: 200
+    n_steps: 10
+    n_parallel: 20
+    method: heun
+    pf_ode: true
+    variants: [baseline_noise, residualized_mean_edm_raw_time_log_std, residualized_mean_edm_logsigma_resC]
+  - n_samples: 200
+    n_steps: 15
+    n_parallel: 20
+    method: heun
+    pf_ode: true
+    variants: [baseline_noise, residualized_mean_edm_raw_time_log_std, residualized_mean_edm_logsigma_resC]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: true
+    variants: [baseline_noise, residualized_mean_edm_raw_time_log_std, residualized_mean_edm_logsigma_resC]
+  - n_samples: 200
+    n_steps: 50
+    n_parallel: 20
+    method: heun
+    pf_ode: true
+    variants: [baseline_noise, residualized_mean_edm_raw_time_log_std, residualized_mean_edm_logsigma_resC]
+  - n_samples: 200
+    n_steps: 5
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    variants: [linear_fm_raw_time, linear_fm_residualized_mean_raw_time]
+  - n_samples: 200
+    n_steps: 10
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    variants: [linear_fm_raw_time, linear_fm_residualized_mean_raw_time]
+  - n_samples: 200
+    n_steps: 15
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    variants: [linear_fm_raw_time, linear_fm_residualized_mean_raw_time]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    variants: [linear_fm_raw_time, linear_fm_residualized_mean_raw_time]
+  - n_samples: 200
+    n_steps: 50
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    variants: [linear_fm_raw_time, linear_fm_residualized_mean_raw_time]

@@ -311,6 +311,138 @@ of σ_max — a property of the combo, not the schedule.
 Recommendation: stop tuning σ_max. Keep σ_max=20 for the winning combo (or
 `sde_initialize_from_data=True` as a safer auto-default). Library defaults unchanged.
 
+### 2026-05-13 Stochastic-interpolant FM sweep — Pareto wins on CRPS and bulk coverage
+
+First benchmark of the stochastic-interpolant FM sampler implemented in
+`_flow_matching.ReverseVelocityInterpolant`. For the linear path, the implied
+score `s(y_t, t) = -(y_t + (1-t)v)/t` is plugged into the marginal-preserving SDE
+`dy = (-v + (ε²/2) s) ds + ε dW` with schedule `ε(t) = stochasticity · t`
+(vanishes at the data endpoint, where the score's `1/t` factor would otherwise
+blow up). Stochasticity=0 reduces exactly to the deterministic ODE sampler.
+Sweep: 2 variants × 8 datasets × 3 seeds × 4 stochasticity values × 4 step counts.
+See `results/raw/stochastic_fm_sweep__all_20260513_140451.jsonl`.
+
+Headline (real datasets, n_steps=25, FM stochasticity=1.0 vs score winning combo):
+
+|                         | Score @ 25 | **FM-stoch=1.0 @ 25** | FM-stoch=0 @ 25 |
+|-------------------------|-----------:|----------------------:|----------------:|
+| CRPS                    | 8.398      | **8.260** (-1.6%)     | 8.281           |
+| `|covE|`@50             | 0.028      | **0.002**             | 0.027           |
+| `|covE|`@90             | **0.020**  | 0.032                 | 0.052           |
+| `|covE|`@95             | **0.012**  | 0.034                 | 0.047           |
+| sample time             | 1.53s      | **0.87s** (-43%)      | 0.84s           |
+
+Stochasticity sweeps monotonically: as `ε` grows 0 → 1, |covE|@50 on real
+collapses from 0.027 to 0.002, |covE|@90 from 0.052 to 0.032, and CRPS *improves*
+from 8.281 to 8.260. The stochastic-interpolant theory predicts marginal
+preservation; in our approximate-velocity setting it manifests as
+strictly-better-calibrated bulk coverage with no CRPS cost.
+
+Findings:
+1. **Stochastic FM Pareto-dominates score on CRPS at every wall-clock budget.**
+   Even FM-stoch=0 @ 5 steps (0.26s, CRPS 8.28) beats score @ 25 steps (1.53s,
+   CRPS 8.40). Stochasticity does not change this ranking; it shifts FM in the
+   coverage dimension only.
+2. **Bulk coverage (`|covE|`@50) is dramatically better under stochastic FM.**
+   The center of the predictive distribution is the regime where FM was already
+   strong; stochasticity sharpens the calibration to near-zero error on every
+   real dataset except `bimodal_mixture` (where FM at high stochasticity
+   *overcovers* the gap between modes).
+3. **Score retains a tail-coverage edge (`|covE|`@95).** Score winning combo: 0.012;
+   FM-stoch=1.0: 0.034. Approximately 2× better in absolute terms; both are
+   within the practical tolerance for most applications. The difference likely
+   reflects the score's EDM preconditioning handling high-σ regions, where
+   FM's flat residual scale gives less tail-shape information.
+4. **Predicted bimodal failure mode is doubly disconfirmed.** FM-stoch=1.0 has
+   the best CRPS on `bimodal_mixture` of any variant ever benchmarked here
+   (0.480 vs score 0.529, -9.3%). Crossing trajectories with stochastic
+   sampling work well for tree-based velocities.
+5. **CRPS-Pareto frontier on real data is owned by FM at every budget.**
+   - 0.26s (FM-stoch=0 @ 5 steps): CRPS 8.28, |covE|@50 0.027
+   - 0.28s (FM-stoch=0.25 @ 5 steps): CRPS 8.29, |covE|@50 0.006 *
+   - 0.43s (FM-stoch=1.0 @ 10 steps): CRPS 8.28, |covE|@50 0.020
+   - 0.87s (FM-stoch=1.0 @ 25 steps): CRPS 8.26, |covE|@50 0.002 *
+   - 1.53s (score @ 25 steps): CRPS 8.40, |covE|@50 0.028
+
+   `*` marks particularly attractive operating points.
+
+This is the first benchmark in which the FM track *dominates* the score track
+on CRPS rather than tying it. The combination of (a) the few-step deterministic
+sampling advantage of FM with (b) the marginal-coverage advantage of stochastic
+sampling produces a Pareto-optimal tabular generative pipeline in which
+`velocity_stochasticity` is a clean inference-time tuning knob: 0 for fastest
+sampling, ~1 for best bulk calibration, with score still preferred only for
+tail-quantile calibration on smooth real-data densities.
+
+Recommendation: promote stochastic-interpolant FM (linear path, residualized,
+`velocity_stochasticity` 0.25–1.0, n_steps 10–25) as the recommended sampling
+mode for tabular regression where CRPS or bulk calibration matters. Library
+defaults remain unchanged for backward compatibility; new fits should opt in.
+Item #11 from `plans/improvements.md` is now decisively beneficial, not just
+implemented.
+
+Open follow-ups suggested by this result:
+1. Tail-calibration gap (`|covE|`@95) — can a different stochasticity schedule
+   (e.g., `ε(t) = c·t·(1-t)` instead of `c·t`) close it without sacrificing the
+   bulk wins?
+2. FM-equivalent log-σ t-sampling — would close the residual CRPS variance
+   relative to the converged FM asymptote.
+3. Non-linear schedules (trig, VP) — now justified, since the stochastic
+   sampler may interact differently with non-constant velocity targets.
+
+### 2026-05-13 Flow matching sweep — sampling-efficiency win, marginal-quality tie
+
+First benchmark of the linear-flow-matching path implemented in `_flow_matching.py`
+plus `LightGBMVelocityModel` in `_score_models.py`. Sweep: 5 variants × 8 datasets ×
+3 seeds × 5 step counts (5/10/15/25/50). Variants: score baseline (Euler & Heun
+pf-ode), score winning combo (`residualized_mean_edm_raw_time_log_std`), the
+strongest current score combo (`residualized_mean_edm_logsigma_resC` with log-σ
+t-sampling + residualizer-C), and two FM variants (`linear_fm_raw_time`,
+`linear_fm_residualized_mean_raw_time`). See
+`results/raw/flow_matching_sweep__all_20260513_125336.jsonl`.
+
+Headline: FM hits its asymptotic CRPS at **n_steps=5**; score methods need ~25.
+Step-count convergence ratio (CRPS at 5 steps / CRPS at 50 steps) is 1.00 for both
+FM variants on real and synthetic, vs 1.14-1.70 for all score variants. The plan's
+core hypothesis — "deterministic ODE sampling on a directly-learned velocity field
+needs fewer steps" — is confirmed cleanly. Matched wall-clock comparison on real
+data: FM-residualized @ 5 steps (1.10s) reaches CRPS 8.43, |covE|@90 = 0.030; the
+strongest score variant needs 15 steps (1.33s) to reach CRPS 8.45, |covE|@90 = 0.028.
+FM is ~20% faster at comparable marginal quality.
+
+Findings on marginal metrics (asymptotic, n_steps=50):
+- **Score winning combo retains a narrow CRPS edge** on real data (8.39 vs 8.43,
+  +0.5%) and ties on synthetic.
+- **FM-residualized matches score on coverage** on synthetic (often better:
+  heteroscedastic_nonlinear |covE|@90 = 0.008 for FM-resid vs 0.022 for S1).
+- **The predicted bimodal failure mode did not materialize.** Linear-FM on
+  `bimodal_mixture` is the *best* variant on coverage (FM-resid |covE|@90 = 0.014,
+  S1 0.022, baseline 0.050) and FM-raw has the best CRPS (0.504, beats S1's 0.529).
+  Crossing trajectories are not a problem for tree-based velocities at this scale.
+  2-rectified flow is *not* a justified follow-up.
+- **Residualization is decisive for FM coverage.** FM-raw real cov@90 = 0.78
+  (badly undercovers); FM-residualized = 0.88 (~nominal). Same "difficulty
+  homogenizer" story as the score track, more pronounced.
+
+Why FM doesn't dominate on raw CRPS: FM lacks the score-track wins that drove
+recent CRPS reductions — there's no FM analog of log-σ t-sampling (uniform t with
+5% endpoint anchor is the current implementation), no EDM preconditioning, and the
+residualizer is at default settings rather than residualizer-C. The 0.5% CRPS gap
+could plausibly close with FM-equivalent versions of these levers.
+
+Recommendation: keep FM as an experimental variant. The library default stays
+score-based. FM is the right choice when sampling latency dominates training cost
+(few-step ODE sampling) or when bimodal calibration matters; score remains
+preferred for raw CRPS on real tabular regression. Item #11 from
+`plans/improvements.md` (tree-based flow matching) is now *implemented and
+benchmarked* rather than closed-or-deferred.
+
+Open follow-ups (not yet justified but plausible):
+1. FM-equivalent t-sampling (`log(t/(1-t))` Normal) — could close the CRPS gap.
+2. FM-residualized with residualizer-C — could close the coverage gap on real data.
+Both are small additions; would launch only if (1) and (2) are jointly worth the
+wall-clock latency advantage on a real downstream use case.
+
 ### 2026-05-13 PF-ODE / Heun sampler sweep (post-fix) — viable sampler, defaults unchanged
 
 Re-run of `pf_ode_sweep.yaml` after the chunked-sampling bug fix. Same config as the
