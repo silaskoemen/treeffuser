@@ -1,0 +1,214 @@
+# SDE-under-matched-residualizer ablation. Tests whether any
+# (schedule, stochasticity, residualizer) combination of vp_fm_sde beats
+# vp_fm_ode + residualizer-C on the full 10-dataset UCI suite. The prior
+# residualizer_fm_sweep tested SDE only at stoch=1.0 on a 4-dataset subset.
+# Two gaps to close:
+#   1. Lower stochasticity (0.25, 0.5) under residualizer-C — untested on VP.
+#   2. SDE × residualizer-E combination — untested on full suite.
+# Results determine whether SDE earns a headline row in the paper or moves
+# entirely to the method + ablation sections.
+
+seeds: [0, 1, 2]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  - name: yacht
+    n_train: 277
+    n_test: 31
+  - name: concrete
+    n_train: 927
+    n_test: 103
+  - name: energy
+    n_train: 691
+    n_test: 77
+  - name: diabetes
+    n_train: 400
+    n_test: 42
+  - name: wine
+    n_train: 5847
+    n_test: 650
+  - name: kin8nm
+    n_train: 5000
+    n_test: 1000
+  - name: power_plant
+    n_train: 8611
+    n_test: 957
+  - name: naval
+    n_train: 10741
+    n_test: 1193
+  - name: california_housing
+    n_train: 8000
+    n_test: 2000
+  - name: protein
+    n_train: 5000
+    n_test: 1500
+
+variants:
+  # vp_fm_sde × schedule=linear × stoch ∈ {0.25, 0.5, 1.0} × residualizer-C
+  - name: vp_fm_sde_linear_lo025_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_sde_linear_lo050_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_sde_linear_lo100_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+
+  # vp_fm_sde × schedule=sqrt × stoch ∈ {0.5, 1.0} × residualizer-C
+  - name: vp_fm_sde_sqrt_lo100_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_sde_sqrt_lo050_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+
+  # vp_fm_sde × schedule=linear × stoch=1.0 × residualizer-E
+  - name: vp_fm_sde_linear_lo100_E
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+        early_stopping_rounds: 30
+
+samplers:
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 0.25
+    velocity_stochasticity_schedule: linear
+    variants: [vp_fm_sde_linear_lo025_C]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 0.5
+    velocity_stochasticity_schedule: linear
+    variants: [vp_fm_sde_linear_lo050_C]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: linear
+    variants: [vp_fm_sde_linear_lo100_C]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: sqrt
+    variants: [vp_fm_sde_sqrt_lo100_C]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 0.5
+    velocity_stochasticity_schedule: sqrt
+    variants: [vp_fm_sde_sqrt_lo050_C]
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: linear
+    variants: [vp_fm_sde_linear_lo100_E]

@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from treeffuser._flow_matching import ReverseVelocityInterpolant
 from treeffuser._flow_matching import ReverseVelocityODE
-from treeffuser._flow_matching import linear_stochasticity_schedule
+from treeffuser._flow_matching import get_stochasticity_schedule
 from treeffuser._residualizer import ConditionalResidualizer
 from treeffuser._residualizer import ResidualizeMode
 from treeffuser._scaler import ScalerMixedTypes
@@ -334,6 +334,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         sampler_method: str = "euler",
         pf_ode: bool = False,
         velocity_stochasticity: float = 0.0,
+        velocity_stochasticity_schedule: str = "linear",
     ) -> Float[ndarray, "n_samples batch y_dim"]:
         """
         Sample responses from the diffusion model conditional on the given input data `X`.
@@ -364,10 +365,15 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
             Stochasticity strength for flow-matching sampling. Only meaningful when
             `training_objective="flow_matching"`. 0.0 (default) keeps the existing
             deterministic reverse-velocity ODE; positive values switch to the
-            stochastic-interpolant SDE with schedule `ε(t) = velocity_stochasticity * t`,
-            which preserves the implied marginal at every t and can broaden the
-            sampling distribution to improve coverage at the cost of more sample-time
-            steps. Raises if set non-zero under `training_objective="score"`.
+            stochastic-interpolant SDE that preserves the implied marginal at every t
+            and can broaden the sampling distribution to improve coverage at the cost
+            of more sample-time steps. Raises if set non-zero under
+            `training_objective="score"`.
+        velocity_stochasticity_schedule : str, optional
+            Shape of the stochasticity schedule eps(t). Currently supported:
+            "linear" (default, eps = stoch * t), "quadratic" (stoch * t^2),
+            "sqrt" (stoch * sqrt(t)), "tent" (stoch * t * (1 - t)). Only meaningful
+            when `velocity_stochasticity > 0`.
 
         Returns
         -------
@@ -400,6 +406,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
             sampler_method=sampler_method,
             pf_ode=pf_ode,
             velocity_stochasticity=velocity_stochasticity,
+            velocity_stochasticity_schedule=velocity_stochasticity_schedule,
         )
 
         # Ensure output aligns with original shape provided by user
@@ -419,6 +426,7 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
         sampler_method: str = "euler",
         pf_ode: bool = False,
         velocity_stochasticity: float = 0.0,
+        velocity_stochasticity_schedule: str = "linear",
     ) -> Float[ndarray, "n_samples batch y_dim"]:
         """
         Sampling method that preserves shape conventions.
@@ -495,7 +503,9 @@ class BaseTabularDiffusion(BaseEstimator, abc.ABC):
                     reverse_dynamics = ReverseVelocityInterpolant(
                         velocity_fn=_velocity_fn,
                         flow_path=velocity_model.flow_path,
-                        stochasticity_schedule=linear_stochasticity_schedule(velocity_stochasticity),
+                        stochasticity_schedule=get_stochasticity_schedule(
+                            velocity_stochasticity_schedule, velocity_stochasticity
+                        ),
                         t_reverse_origin=1.0,
                     )
                 else:

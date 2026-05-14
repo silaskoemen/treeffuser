@@ -51,11 +51,21 @@ ruff = "ruff check src tests benchmarks"
 
 [feature.bench.dependencies]
 pyyaml = "*"
+ucimlrepo = ">=0.0.7,<0.0.8"
+requests = ">=2.34.0,<3"
+openpyxl = ">=3.1.5,<4"
+xlrd = ">=2.0.2,<3"
+ngboost = ">=0.5.1,<0.6"
+xgboost = ">=2,<4"
+catboost = ">=1.2,<2"
+pytorch = ">=2.4,<3"
 
 [feature.bench.tasks]
 bench-smoke = "python -m benchmarks.run --config benchmarks/configs/smoke.yaml"
 bench-synthetic = "python -m benchmarks.run --config benchmarks/configs/synthetic_core.yaml"
 bench-real = "python -m benchmarks.run --config benchmarks/configs/real_smoke.yaml"
+bench-paper-baselines = "python -m benchmarks.run --config benchmarks/configs/paper_probabilistic_baselines.yaml"
+paper = { cmd = "latexmk -pdf -interaction=nonstopmode uai2026-main.tex", cwd = "paper" }
 
 [feature.build.dependencies]
 python-build = "*"

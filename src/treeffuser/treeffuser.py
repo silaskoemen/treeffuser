@@ -41,6 +41,7 @@ class Treeffuser(BaseTabularDiffusion):
         loss_weighting: str = "uniform",
         min_snr_gamma: float = 5.0,
         t_sampling: str = "uniform",
+        uniform_endpoint_fraction: float = 0.05,
         log_sigma_p_mean: float = -1.2,
         log_sigma_p_std: float = 1.2,
         residualize: ResidualizeMode = "off",
@@ -98,8 +99,11 @@ class Treeffuser(BaseTabularDiffusion):
             Objective used to train the generative model. "score" preserves the existing
             score-SDE behavior. "flow_matching" trains a direct velocity field and uses
             deterministic reverse-velocity ODE sampling.
-        flow_path : {"linear"}
-            Probability path used when `training_objective="flow_matching"`.
+        flow_path : {"linear", "trig", "vp"}
+            Probability path used when `training_objective="flow_matching"`. "linear" is
+            the rectified-flow path `y_t = (1-t) y0 + t z`; "trig" is the variance-
+            preserving cosine/sine path; "vp" is the DDPM-style linear-beta variance-
+            preserving schedule.
         score_parameterization : str
             Score-model regression target and score reconstruction strategy. Currently supported:
             "noise", "x0", and "edm".
@@ -118,17 +122,28 @@ class Treeffuser(BaseTabularDiffusion):
         min_snr_gamma : float
             Cap on the signal-to-noise ratio used when `loss_weighting="min_snr"`. Ignored
             otherwise. Standard practice is a value in the range 1-5.
-        t_sampling : {"uniform", "log_sigma_normal"}
+        t_sampling : {"uniform", "log_sigma_normal", "log_snr_normal"}
             Distribution used to draw the training-time `t` values. "uniform" (default)
-            keeps the current behavior. "log_sigma_normal" follows Karras et al. (EDM)
-            by drawing `log sigma(t) ~ Normal(log_sigma_p_mean, log_sigma_p_std)` and
-            inverting back to `t`. For tree-based score models this is a stronger lever
-            than loss weighting because it shifts the histogram-bin density.
+            keeps the historical Treeffuser behavior (with a small random anchor at t=1
+            controlled by `uniform_endpoint_fraction` under flow matching).
+            "log_sigma_normal" follows Karras et al. (EDM) by drawing
+            `log sigma(t) ~ Normal(log_sigma_p_mean, log_sigma_p_std)` and inverting
+            back to `t`; under flow matching this samples log of the path's noise
+            coefficient beta(t) (so values are clipped at log beta = 0 since beta <= 1).
+            "log_snr_normal" (flow-matching only) draws `log(alpha(t)/beta(t)) ~ Normal`
+            instead; log-SNR has full real-line range so the Normal is not clipped.
+            For tree-based learners these density-shift levers are stronger than loss
+            weighting because they directly move histogram-bin density.
+        uniform_endpoint_fraction : float
+            Fraction of uniform-sampled training rows whose `t` is randomly set to
+            exactly 1 (endpoint anchor). Only active under flow matching with
+            `t_sampling="uniform"`. Default 0.05.
         log_sigma_p_mean, log_sigma_p_std : float
-            Mean and standard deviation of the log-sigma distribution used when
-            `t_sampling="log_sigma_normal"`. Defaults to EDM's (-1.2, 1.2). For
-            standardized targets, `log sigma ~ Normal(-1.2, 1.2)` concentrates training
-            mass near `sigma ~ 0.3` and tapers in both directions.
+            Mean and standard deviation of the log-noise distribution used by
+            `t_sampling="log_sigma_normal"` (score: log sigma; flow matching: log beta).
+            Also reused by `"log_snr_normal"` for the log-SNR axis. EDM defaults (-1.2,
+            1.2) are intended for the log-sigma axis; for log_snr_normal a more typical
+            choice is `(p_mean=0, p_std=2)` centered around log SNR = 0.
         residualize : {"off", "mean", "mean_scale"}
             Optional conditional residualization before score-model fitting. "mean"
             subtracts a cross-fitted conditional mean, and "mean_scale" additionally
@@ -173,6 +188,7 @@ class Treeffuser(BaseTabularDiffusion):
         self.loss_weighting = loss_weighting
         self.min_snr_gamma = min_snr_gamma
         self.t_sampling = t_sampling
+        self.uniform_endpoint_fraction = uniform_endpoint_fraction
         self.log_sigma_p_mean = log_sigma_p_mean
         self.log_sigma_p_std = log_sigma_p_std
         self.residualize = residualize
@@ -212,12 +228,8 @@ class Treeffuser(BaseTabularDiffusion):
             ignored_params.append("loss_weighting")
         if self.min_snr_gamma != 5.0:
             ignored_params.append("min_snr_gamma")
-        if self.t_sampling != "uniform":
-            ignored_params.append("t_sampling")
-        if self.log_sigma_p_mean != -1.2:
-            ignored_params.append("log_sigma_p_mean")
-        if self.log_sigma_p_std != 1.2:
-            ignored_params.append("log_sigma_p_std")
+        # t_sampling, log_sigma_p_mean, log_sigma_p_std are now used by the
+        # flow-matching path too (log-beta-normal sampler reuses the same names).
         if not ignored_params:
             return
         warnings.warn(
@@ -274,6 +286,10 @@ class Treeffuser(BaseTabularDiffusion):
             n_jobs=self.n_jobs,
             flow_path=self.flow_path,
             noise_features=self.noise_features,
+            t_sampling=self.t_sampling,
+            log_sigma_p_mean=self.log_sigma_p_mean,
+            log_sigma_p_std=self.log_sigma_p_std,
+            uniform_endpoint_fraction=self.uniform_endpoint_fraction,
             **self.extra_lightgbm_params,
         )
         return velocity_model

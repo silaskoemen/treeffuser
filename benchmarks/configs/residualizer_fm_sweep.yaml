@@ -1,0 +1,448 @@
+# Residualizer A-E sweep on the four candidate FM Pareto-frontier operating
+# points. Mirrors the score-side residualizer_sweep + residualizer_es_sweep
+# setup: A (current defaults), B (regularized for small n), C (high-capacity),
+# D (early-stopped moderate), E (early-stopped high-cap). The score-side
+# conclusion was that C wins on real data and D self-tunes via early stopping;
+# this sweep tests whether the same ranking transfers to FM, and whether the
+# residual CRPS gap to treeffuser_score_combo closes when FM gets the same
+# residualizer treatment.
+#
+# Includes a fourth FM operating point (vp_fm_sde_sqrt) that was the CRPS
+# winner in the prior flow_path_sweep on small real data but has not been
+# validated on the canonical UCI suite. This sweep tells us whether to
+# promote it to a paper-grade operating point or drop it.
+
+seeds: [0, 1, 2]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  - name: diabetes
+    n_train: 400
+    n_test: 42
+  - name: energy
+    n_train: 691
+    n_test: 77
+  - name: california_housing
+    n_train: 8000
+    n_test: 2000
+  - name: protein
+    n_train: 5000
+    n_test: 1500
+
+variants:
+  # ============= linear_fm_sde × residualizer A-E =============
+  - name: linear_fm_sde_resid_A
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+  - name: linear_fm_sde_resid_B
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 500
+        learning_rate: 0.05
+        max_depth: 4
+        num_leaves: 15
+        min_child_samples: 40
+  - name: linear_fm_sde_resid_C
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: linear_fm_sde_resid_D
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: 6
+        num_leaves: 31
+        min_child_samples: 20
+        early_stopping_rounds: 30
+  - name: linear_fm_sde_resid_E
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+        early_stopping_rounds: 30
+
+  # ============= vp_fm_ode × residualizer A-E =============
+  - name: vp_fm_ode_resid_A
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+  - name: vp_fm_ode_resid_B
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 500
+        learning_rate: 0.05
+        max_depth: 4
+        num_leaves: 15
+        min_child_samples: 40
+  - name: vp_fm_ode_resid_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_ode_resid_D
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: 6
+        num_leaves: 31
+        min_child_samples: 20
+        early_stopping_rounds: 30
+  - name: vp_fm_ode_resid_E
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+        early_stopping_rounds: 30
+
+  # ============= vp_fm_sde × residualizer A-E =============
+  - name: vp_fm_sde_resid_A
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+  - name: vp_fm_sde_resid_B
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 500
+        learning_rate: 0.05
+        max_depth: 4
+        num_leaves: 15
+        min_child_samples: 40
+  - name: vp_fm_sde_resid_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_sde_resid_D
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: 6
+        num_leaves: 31
+        min_child_samples: 20
+        early_stopping_rounds: 30
+  - name: vp_fm_sde_resid_E
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+        early_stopping_rounds: 30
+
+  # ============= vp_fm_sde_sqrt × residualizer A-E (untested 4th corner) =============
+  - name: vp_fm_sde_sqrt_resid_A
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+  - name: vp_fm_sde_sqrt_resid_B
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 500
+        learning_rate: 0.05
+        max_depth: 4
+        num_leaves: 15
+        min_child_samples: 40
+  - name: vp_fm_sde_sqrt_resid_C
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_sde_sqrt_resid_D
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: 6
+        num_leaves: 31
+        min_child_samples: 20
+        early_stopping_rounds: 30
+  - name: vp_fm_sde_sqrt_resid_E
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 2000
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+        early_stopping_rounds: 30
+
+samplers:
+  # linear_fm_sde sampler: Heun SDE, stoch=1.0, schedule=linear, n_steps=25
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: linear
+    variants:
+      - linear_fm_sde_resid_A
+      - linear_fm_sde_resid_B
+      - linear_fm_sde_resid_C
+      - linear_fm_sde_resid_D
+      - linear_fm_sde_resid_E
+
+  # vp_fm_ode sampler: Heun ODE @ 5 steps
+  - n_samples: 200
+    n_steps: 5
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 0.0
+    velocity_stochasticity_schedule: linear
+    variants:
+      - vp_fm_ode_resid_A
+      - vp_fm_ode_resid_B
+      - vp_fm_ode_resid_C
+      - vp_fm_ode_resid_D
+      - vp_fm_ode_resid_E
+
+  # vp_fm_sde (linear schedule) sampler: Heun SDE, stoch=1.0, schedule=linear, n_steps=25
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: linear
+    variants:
+      - vp_fm_sde_resid_A
+      - vp_fm_sde_resid_B
+      - vp_fm_sde_resid_C
+      - vp_fm_sde_resid_D
+      - vp_fm_sde_resid_E
+
+  # vp_fm_sde_sqrt sampler: Heun SDE, stoch=1.0, schedule=sqrt, n_steps=25
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: sqrt
+    variants:
+      - vp_fm_sde_sqrt_resid_A
+      - vp_fm_sde_sqrt_resid_B
+      - vp_fm_sde_sqrt_resid_C
+      - vp_fm_sde_sqrt_resid_D
+      - vp_fm_sde_sqrt_resid_E

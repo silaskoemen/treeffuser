@@ -1,0 +1,124 @@
+# Paper-grade external probabilistic baseline comparison.
+#
+# This complements paper_real_data_v2.yaml. It intentionally does NOT rerun
+# Treeffuser: join these rows with the already-completed paper_real_data_v2
+# results when making the paper table. It keeps the same 10 UCI datasets, seeds,
+# split policy, metrics, and sample count, but adds non-Treeffuser probabilistic
+# regressors from the original testbed benchmark family:
+# NGBoost, iBUG, distributional random forests, LightGBM quantile regression,
+# a neural deep ensemble, and CatBoost RMSEWithUncertainty.
+#
+# Deep Ensemble is used instead of CARD in the main baseline run: the old
+# testbed runner documents a CARD/Treeffuser segfault interaction, and CARD's
+# two-stage diffusion training makes it a better appendix-only stress test.
+# The iBUG adapter uses the official `ibug` package if available; otherwise it
+# falls back to XGBoost leaf-affinity neighbors so the pixi benchmark remains
+# runnable without a PyPI extension build.
+# This is a fixed-budget external baseline run, not a full hyperparameter
+# optimization. For a final "best-in-class" claim, either run explicit baseline
+# sweeps per model family or report the old tuned testbed results alongside this
+# fixed-budget comparison.
+#
+# DRF remains wired but disabled by default because it needs the external
+# R-backed `drf` package documented in testbed/src/testbed/models/drf_.py.
+
+seeds: [0, 1, 2]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  - name: yacht
+    n_train: 277
+    n_test: 31
+  - name: concrete
+    n_train: 927
+    n_test: 103
+  - name: energy
+    n_train: 691
+    n_test: 77
+  - name: diabetes
+    n_train: 400
+    n_test: 42
+  - name: wine
+    n_train: 5847
+    n_test: 650
+  - name: kin8nm
+    n_train: 5000
+    n_test: 1000
+  - name: power_plant
+    n_train: 8611
+    n_test: 957
+  - name: naval
+    n_train: 10741
+    n_test: 1193
+  - name: california_housing
+    n_train: 8000
+    n_test: 2000
+  - name: protein
+    n_train: 5000
+    n_test: 1500
+
+variants:
+  - name: ngboost_gaussian
+    model: ngboost
+    params:
+      n_estimators: 1500
+      learning_rate: 0.05
+      early_stopping_rounds: 20
+  - name: ibug_xgboost
+    model: ibug
+    params:
+      k: 100
+      n_estimators: 300
+      learning_rate: 0.05
+      max_depth: 6
+      leaf_sample_trees: 64
+  - name: qreg_lightgbm
+    model: qreg_lightgbm
+    params:
+      quantile_count: 31
+      n_estimators: 1000
+      learning_rate: 0.05
+      num_leaves: 31
+      min_child_samples: 20
+      n_jobs: -1
+  - name: deep_ensemble
+    model: deep_ensemble
+    params:
+      n_ensembles: 3
+      hidden_size: 100
+      n_layers: 2
+      max_epochs: 100
+      learning_rate: 0.001
+      batch_size: 256
+      patience: 10
+  - name: catboost_uncertainty
+    model: catboost_uncertainty
+    params:
+      iterations: 1000
+      learning_rate: 0.05
+      depth: 6
+      early_stopping_rounds: 50
+      thread_count: -1
+  - name: drf
+    model: drf
+    enabled: false
+    params:
+      min_node_size: 10
+      num_trees: 1000
+
+samplers:
+  - n_samples: 200
+    n_steps: 1
+    n_parallel: 200
+    method: euler
+    pf_ode: false
+    variants:
+      - ngboost_gaussian
+      - ibug_xgboost
+      - qreg_lightgbm
+      - deep_ensemble
+      - catboost_uncertainty

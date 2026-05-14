@@ -4,8 +4,11 @@ import csv
 import hashlib
 import json
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +17,8 @@ import numpy as np
 from benchmarks.datasets import make_dataset
 from benchmarks.metrics import DEFAULT_COVERAGE_LEVELS
 from benchmarks.metrics import binned_coverage_and_crps
+from benchmarks.metrics import crps_climatology
+from benchmarks.metrics import crps_skill_score
 from benchmarks.metrics import difficulty_bin_keys
 from benchmarks.metrics import evaluate_samples
 from benchmarks.metrics import per_point_crps
@@ -37,6 +42,7 @@ class SamplerConfig:
     method: str = "euler"
     pf_ode: bool = False
     velocity_stochasticity: float = 0.0
+    velocity_stochasticity_schedule: str = "linear"
     variants: tuple[str, ...] | None = None
 
 
@@ -51,9 +57,23 @@ def run_benchmark(config: dict[str, Any], output_path: Path, output_format: str 
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     writer = ResultWriter(output_path, output_format)
+    logger = BenchmarkLogger(output_path.with_suffix(f"{output_path.suffix}.log"))
+    logger.log(
+        "run_start",
+        output_path=str(output_path),
+        n_datasets=len(datasets),
+        n_seeds=len(seeds),
+        n_variants=len(variants),
+    )
     for dataset_config in datasets:
         for seed in seeds:
             resolved_seeds = resolve_seeds(seed=seed, seed_policy=seed_policy)
+            logger.log(
+                "dataset_start",
+                dataset=dataset_config["name"],
+                seed=seed,
+                data_seed=resolved_seeds.data_seed,
+            )
             dataset = make_dataset(
                 name=dataset_config["name"],
                 n_train=dataset_config["n_train"],
@@ -62,15 +82,40 @@ def run_benchmark(config: dict[str, Any], output_path: Path, output_format: str 
                 seed=resolved_seeds.data_seed,
             )
             for variant in variants:
+                logger.log(
+                    "fit_start",
+                    dataset=dataset.name,
+                    variant=variant.name,
+                    model_type=variant.model,
+                    model_seed=resolved_seeds.model_seed,
+                    n_train=dataset_config["n_train"],
+                    n_test=dataset_config["n_test"],
+                )
                 model, fit_time = fit_variant(
                     variant=variant,
                     X_train=dataset.X_train,
                     y_train=dataset.y_train,
                     model_seed=resolved_seeds.model_seed,
                 )
+                logger.log(
+                    "fit_done",
+                    dataset=dataset.name,
+                    variant=variant.name,
+                    model_type=variant.model,
+                    fit_time=fit_time,
+                )
                 for sampler_config in sampler_configs:
                     if sampler_config.variants is not None and variant.name not in sampler_config.variants:
                         continue
+                    logger.log(
+                        "eval_start",
+                        dataset=dataset.name,
+                        variant=variant.name,
+                        model_type=variant.model,
+                        n_samples=sampler_config.n_samples,
+                        n_steps=sampler_config.n_steps,
+                        sampler_method=sampler_config.method,
+                    )
                     row = evaluate_variant(
                         model=model,
                         variant=variant,
@@ -78,6 +123,7 @@ def run_benchmark(config: dict[str, Any], output_path: Path, output_format: str 
                         dataset_config=dataset_config,
                         X_test=dataset.X_test,
                         y_test=dataset.y_test,
+                        y_train=dataset.y_train,
                         seeds=resolved_seeds,
                         sampler_config=sampler_config,
                         fit_time=fit_time,
@@ -85,6 +131,18 @@ def run_benchmark(config: dict[str, Any], output_path: Path, output_format: str 
                         conformal_cal_fraction=conformal_cal_fraction,
                     )
                     writer.write(row)
+                    logger.log(
+                        "row_written",
+                        dataset=dataset.name,
+                        variant=variant.name,
+                        model_type=variant.model,
+                        fit_time=row["fit_time"],
+                        sample_time=row["sample_time"],
+                        crps=row["crps"],
+                        output_path=str(output_path),
+                    )
+            logger.log("dataset_done", dataset=dataset.name, seed=seed)
+    logger.log("run_done", output_path=str(output_path))
 
 
 def fit_variant(variant, X_train, y_train, model_seed: int):
@@ -106,6 +164,7 @@ def evaluate_variant(
     sampler_config: SamplerConfig,
     fit_time: float,
     provenance: dict[str, Any],
+    y_train=None,
     conformal_cal_fraction: float | None = None,
 ) -> dict[str, Any]:
     start = time.perf_counter()
@@ -119,6 +178,7 @@ def evaluate_variant(
         sampler_method=sampler_config.method,
         pf_ode=sampler_config.pf_ode,
         velocity_stochasticity=sampler_config.velocity_stochasticity,
+        velocity_stochasticity_schedule=sampler_config.velocity_stochasticity_schedule,
     )
     sample_time = time.perf_counter() - start
 
@@ -129,6 +189,7 @@ def evaluate_variant(
     row = {
         "dataset": dataset_name,
         "variant": variant.name,
+        "model_type": variant.model,
         "seed": seeds.data_seed,
         "data_seed": seeds.data_seed,
         "model_seed": seeds.model_seed,
@@ -143,6 +204,7 @@ def evaluate_variant(
         "sampler_method": sampler_config.method,
         "sampler_pf_ode": sampler_config.pf_ode,
         "sampler_velocity_stochasticity": sampler_config.velocity_stochasticity,
+        "sampler_velocity_stochasticity_schedule": sampler_config.velocity_stochasticity_schedule,
         "fit_time": fit_time,
         "sample_time": sample_time,
         "training_rows": training_rows,
@@ -153,6 +215,10 @@ def evaluate_variant(
     }
     row.update(provenance)
     row.update(metrics)
+    if y_train is not None:
+        clim = crps_climatology(y_train=y_train, y_true=y_test)
+        row["crps_climatology"] = clim
+        row["crps_skill_score"] = crps_skill_score(crps_model=metrics["crps"], crps_climatology_val=clim)
     if conformal_cal_fraction is not None:
         row.update(
             _conformal_metrics(
@@ -275,6 +341,24 @@ class ResultWriter:
             writer.writerows(self.rows)
 
 
+class BenchmarkLogger:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.path.unlink(missing_ok=True)
+
+    def log(self, event: str, **fields) -> None:
+        row = {
+            "ts": datetime.now(tz=timezone.utc).isoformat(),
+            "event": event,
+            **_json_safe(fields),
+        }
+        line = json.dumps(row, sort_keys=True)
+        print(line, file=sys.stderr, flush=True)
+        with self.path.open("a") as file:
+            file.write(line)
+            file.write("\n")
+
+
 def _json_safe(value):
     if isinstance(value, dict):
         return {key: _json_safe(item) for key, item in value.items()}
@@ -294,6 +378,7 @@ def _make_sampler_configs(config: list[dict[str, Any]]) -> list[SamplerConfig]:
             method=str(item.get("method", "euler")),
             pf_ode=bool(item.get("pf_ode", False)),
             velocity_stochasticity=float(item.get("velocity_stochasticity", 0.0)),
+            velocity_stochasticity_schedule=str(item.get("velocity_stochasticity_schedule", "linear")),
             variants=tuple(item["variants"]) if "variants" in item else None,
         )
         for item in config

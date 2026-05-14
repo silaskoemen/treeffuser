@@ -29,13 +29,17 @@ def evaluate_samples(
     y_mean = y_samples.mean(axis=0)
     residual = y_mean - y_true
     per_point_crps_vec = per_point_crps(y_samples, y_true)
+    pit_stats = pit_ks_test(y_samples, y_true)
 
     result = {
         "crps": float(np.mean(per_point_crps_vec)),
         "rmse": float(np.sqrt(np.mean(residual**2))),
         "mae": float(np.mean(np.abs(residual))),
+        "dss": dawid_sebastiani_score(y_samples, y_true),
         "quantile_rmsce": quantile_calibration_error(y_samples, y_true)["rmsce"],
         "quantile_mace": quantile_calibration_error(y_samples, y_true)["mace"],
+        "pit_ks_stat": pit_stats["pit_ks_stat"],
+        "pit_ks_pvalue": pit_stats["pit_ks_pvalue"],
     }
 
     bin_keys = difficulty_bin_keys(y_samples, per_point_crps_vec)
@@ -86,6 +90,88 @@ def evaluate_samples(
             result[f"{prefix}_{bin_name}bin_max_error"] = stats["max_error"]
 
     return result
+
+
+def dawid_sebastiani_score(
+    y_samples: Float[np.ndarray, "n_samples batch y_dim"],
+    y_true: Float[np.ndarray, "batch y_dim"],
+) -> float:
+    """Mean Dawid-Sebastiani score over batch and y_dim.
+
+    DSS_i = log(var_i) + (y_i - mu_i)^2 / var_i, with mu_i, var_i the per-point
+    predictive mean and variance from `y_samples`. Penalises mis-calibrated
+    variance more sharply than CRPS; commonly reported alongside CRPS to
+    disentangle mean vs variance miscalibration. Variance is floored at 1e-12
+    to avoid log(0) when the model produces a Dirac.
+    """
+    samples = np.asarray(y_samples)
+    truth = np.asarray(y_true)
+    if truth.ndim == 1:
+        truth = truth.reshape(-1, 1)
+    if samples.ndim == 2:
+        samples = samples[:, :, None]
+    mu = samples.mean(axis=0)
+    var = np.maximum(samples.var(axis=0, ddof=1), 1e-12)
+    dss = np.log(var) + (truth - mu) ** 2 / var
+    return float(np.mean(dss))
+
+
+def pit_ks_test(
+    y_samples: Float[np.ndarray, "n_samples batch y_dim"],
+    y_true: Float[np.ndarray, "batch y_dim"],
+) -> dict[str, float]:
+    """Kolmogorov-Smirnov calibration test of PIT values against Uniform(0,1).
+
+    Under perfect calibration, PIT_i = F_i(y_i) ~ Uniform(0,1) where F_i is
+    the model's predictive CDF at point i. We use the sample-based PIT
+    PIT_i = mean(y_samples_i <= y_i). Values are pooled across output dimensions
+    before the KS test. Returns the (two-sided) KS statistic and p-value;
+    larger p-values fail to reject the uniform null at standard levels.
+    """
+    from scipy.stats import kstest
+
+    samples = np.asarray(y_samples)
+    truth = np.asarray(y_true)
+    if truth.ndim == 1:
+        truth = truth.reshape(-1, 1)
+    if samples.ndim == 2:
+        samples = samples[:, :, None]
+    pit = np.mean(samples <= truth[None, :, :], axis=0).reshape(-1)
+    result = kstest(pit, "uniform")
+    return {"pit_ks_stat": float(result.statistic), "pit_ks_pvalue": float(result.pvalue)}
+
+
+def crps_climatology(
+    y_train: Float[np.ndarray, "n_train y_dim"],
+    y_true: Float[np.ndarray, "batch y_dim"],
+) -> float:
+    """
+    Mean CRPS of the empirical marginal distribution of `y_train` evaluated at
+    `y_true`. This is the "climatological forecast" reference for CRPS skill
+    scores: a model that knows nothing about `x` and predicts the marginal y
+    distribution from training data. CRPS_model / CRPS_climatology = 1 means
+    the model adds no information beyond the marginal.
+    """
+    y_train_arr = np.asarray(y_train)
+    y_true_arr = np.asarray(y_true)
+    if y_train_arr.ndim == 1:
+        y_train_arr = y_train_arr.reshape(-1, 1)
+    if y_true_arr.ndim == 1:
+        y_true_arr = y_true_arr.reshape(-1, 1)
+    n_train = y_train_arr.shape[0]
+    n_test = y_true_arr.shape[0]
+    y_dim = y_true_arr.shape[1]
+    # Broadcast training samples across the test batch and reuse the per-point
+    # CRPS estimator. This handles the (n_samples, batch, y_dim) layout already.
+    samples = np.broadcast_to(y_train_arr[:, None, :], (n_train, n_test, y_dim))
+    return float(np.mean(per_point_crps(samples, y_true_arr)))
+
+
+def crps_skill_score(crps_model: float, crps_climatology_val: float) -> float:
+    """CRPSS = 1 - CRPS_model / CRPS_climatology. 1=perfect, 0=marginal, <0=worse."""
+    if crps_climatology_val <= 0:
+        return float("nan")
+    return 1.0 - crps_model / crps_climatology_val
 
 
 def per_point_crps(

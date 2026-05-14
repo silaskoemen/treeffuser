@@ -14,6 +14,7 @@ plans
 
 # Build and package files
 .pixi/
+catboost_info/
 *.egg
 *.egg-info
 .bootstrap

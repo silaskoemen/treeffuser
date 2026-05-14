@@ -1,0 +1,485 @@
+from __future__ import annotations
+
+import math
+import warnings
+from typing import Any
+
+import lightgbm as lgb
+import numpy as np
+from jaxtyping import Float
+from numpy import ndarray
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+
+class SampleBaseline:
+    """Small adapter protocol for external probabilistic baselines."""
+
+    def fit(
+        self,
+        X: Float[ndarray, "train x_dim"],
+        y: Float[ndarray, "train y_dim"],
+    ) -> SampleBaseline:
+        raise NotImplementedError
+
+    def sample(
+        self,
+        X: Float[ndarray, "batch x_dim"],
+        n_samples: int = 200,
+        seed: int | None = None,
+        **kwargs,
+    ) -> Float[ndarray, "n_samples batch y_dim"]:
+        raise NotImplementedError
+
+
+def _require(package: str, install_hint: str):
+    try:
+        return __import__(package)
+    except ImportError as exc:
+        raise ImportError(f"Benchmark baseline requires optional dependency {package!r}. {install_hint}") from exc
+
+
+class ScaledRegressorMixin:
+    def _fit_scalers(self, X: ndarray, y: ndarray) -> tuple[ndarray, ndarray]:
+        self._x_scaler = StandardScaler()
+        self._y_scaler = StandardScaler()
+        X_scaled = self._x_scaler.fit_transform(X)
+        y_scaled = self._y_scaler.fit_transform(_ensure_2d_y(y))
+        return X_scaled, y_scaled
+
+    def _transform_x(self, X: ndarray) -> ndarray:
+        return self._x_scaler.transform(X)
+
+    def _inverse_y(self, y: ndarray) -> ndarray:
+        shape = y.shape
+        y_2d = y.reshape(-1, shape[-1])
+        return self._y_scaler.inverse_transform(y_2d).reshape(shape)
+
+
+def _ensure_2d_y(y: ndarray) -> ndarray:
+    if y.ndim == 1:
+        return y.reshape(-1, 1)
+    return y
+
+
+class NGBoostGaussianBaseline(ScaledRegressorMixin, SampleBaseline):
+    def __init__(
+        self,
+        n_estimators: int = 5000,
+        learning_rate: float = 0.05,
+        early_stopping_rounds: int = 20,
+        seed: int | None = None,
+    ) -> None:
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.early_stopping_rounds = early_stopping_rounds
+        self.seed = seed
+        self.model = None
+
+    def fit(self, X: ndarray, y: ndarray) -> NGBoostGaussianBaseline:
+        ngboost = _require("ngboost", "Install the bench extras with pixi before running.")
+        y = _ensure_2d_y(y)
+        X_scaled, y_scaled = self._fit_scalers(X, y)
+        if y_scaled.shape[1] != 1:
+            raise ValueError("NGBoostGaussianBaseline currently supports one-dimensional y.")
+        minibatch_frac = min(50_000, X_scaled.shape[0]) / X_scaled.shape[0]
+        validation_fraction = min(int(0.1 * X_scaled.shape[0]), 20_000) / X_scaled.shape[0]
+        self.model = ngboost.NGBRegressor(
+            n_estimators=self.n_estimators,
+            learning_rate=self.learning_rate,
+            early_stopping_rounds=self.early_stopping_rounds,
+            minibatch_frac=minibatch_frac,
+            validation_fraction=validation_fraction,
+            verbose=False,
+            random_state=self.seed,
+        )
+        self.model.fit(X_scaled, y_scaled[:, 0])
+        return self
+
+    def sample(self, X: ndarray, n_samples: int = 200, seed: int | None = None, **kwargs) -> ndarray:
+        del kwargs
+        X_scaled = self._transform_x(X)
+        np.random.seed(seed)
+        samples = np.asarray(self.model.pred_dist(X_scaled).sample(n_samples)).reshape(n_samples, -1, 1)
+        return self._inverse_y(samples)
+
+
+class IBUGXGBoostBaseline(SampleBaseline):
+    def __init__(
+        self,
+        k: int = 100,
+        n_estimators: int = 1000,
+        learning_rate: float = 0.05,
+        max_depth: int = 6,
+        leaf_sample_trees: int = 64,
+        seed: int | None = None,
+    ) -> None:
+        self.k = k
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.max_depth = max_depth
+        self.leaf_sample_trees = leaf_sample_trees
+        self.seed = seed
+        self.model = None
+        self.gbrt_model = None
+        self._train_leaves = None
+        self._train_y = None
+
+    def fit(self, X: ndarray, y: ndarray) -> IBUGXGBoostBaseline:
+        xgboost = _require("xgboost", "Install the bench extras with pixi before running.")
+        y = _ensure_2d_y(y)
+        if y.shape[1] != 1:
+            raise ValueError("IBUGXGBoostBaseline currently supports one-dimensional y.")
+        y_1d = y[:, 0]
+        X_train, X_val, y_train, y_val = train_test_split(
+            X,
+            y_1d,
+            test_size=0.1,
+            random_state=self.seed,
+        )
+        gbrt_model = xgboost.XGBRegressor(
+            n_estimators=self.n_estimators,
+            learning_rate=self.learning_rate,
+            max_depth=self.max_depth,
+            n_jobs=-1,
+            random_state=self.seed,
+            objective="reg:squarederror",
+        ).fit(X_train, y_train)
+        self.gbrt_model = gbrt_model
+        try:
+            from ibug import IBUGWrapper
+        except ImportError:
+            self.model = None
+            self._train_leaves = gbrt_model.apply(X_train)
+            self._train_y = y_train
+        else:
+            self.model = IBUGWrapper(k=self.k).fit(
+                gbrt_model,
+                X_train,
+                y_train,
+                X_val=X_val,
+                y_val=y_val,
+            )
+        return self
+
+    def sample(self, X: ndarray, n_samples: int = 200, seed: int | None = None, **kwargs) -> ndarray:
+        del kwargs
+        rng = np.random.default_rng(seed)
+        if self.model is not None:
+            location, scale = self.model.pred_dist(X)
+            scale = np.maximum(scale, 1e-12)
+            return rng.normal(location, scale, size=(n_samples, X.shape[0]))[:, :, None]
+
+        test_leaves = self.gbrt_model.apply(X)
+        samples = np.empty((n_samples, X.shape[0]), dtype=np.float64)
+        for i, leaves in enumerate(test_leaves):
+            affinity = np.mean(
+                self._train_leaves[:, : self.leaf_sample_trees] == leaves[None, : self.leaf_sample_trees],
+                axis=1,
+            )
+            k = min(self.k, affinity.shape[0])
+            neighbor_idx = np.argpartition(affinity, -k)[-k:]
+            draw_idx = rng.choice(neighbor_idx, size=n_samples, replace=True)
+            samples[:, i] = self._train_y[draw_idx]
+        return samples[:, :, None]
+
+
+class DistributionalRandomForestBaseline(SampleBaseline):
+    def __init__(
+        self,
+        min_node_size: int = 10,
+        num_trees: int = 1000,
+        seed: int | None = None,
+    ) -> None:
+        self.min_node_size = min_node_size
+        self.num_trees = num_trees
+        self.seed = seed
+        self.model = None
+
+    def fit(self, X: ndarray, y: ndarray) -> DistributionalRandomForestBaseline:
+        drf_pkg = _require(
+            "drf",
+            "DRF is not a normal pixi dependency; install the R-backed drf package as documented in testbed.",
+        )
+        del self.seed
+        self.model = drf_pkg.drf(
+            min_node_size=self.min_node_size,
+            num_trees=self.num_trees,
+            splitting_rule="FourierMMD",
+        )
+        self.model.fit(X, _ensure_2d_y(y))
+        return self
+
+    def sample(self, X: ndarray, n_samples: int = 200, seed: int | None = None, **kwargs) -> ndarray:
+        del kwargs
+        np.random.seed(seed)
+        out = self.model.predict(newdata=X, functional="sample", n=n_samples).sample
+        return np.transpose(out, (2, 0, 1))
+
+
+class LightGBMQuantileBaseline(SampleBaseline):
+    def __init__(
+        self,
+        quantile_count: int = 99,
+        n_estimators: int = 3000,
+        learning_rate: float = 0.05,
+        num_leaves: int = 31,
+        min_child_samples: int = 20,
+        n_jobs: int = -1,
+        seed: int | None = None,
+    ) -> None:
+        self.quantile_count = quantile_count
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.num_leaves = num_leaves
+        self.min_child_samples = min_child_samples
+        self.n_jobs = n_jobs
+        self.seed = seed
+        self.models: list[Any] = []
+        self.quantiles = np.linspace(1.0 / (quantile_count + 1), quantile_count / (quantile_count + 1), quantile_count)
+
+    def fit(self, X: ndarray, y: ndarray) -> LightGBMQuantileBaseline:
+        y = _ensure_2d_y(y)
+        if y.shape[1] != 1:
+            raise ValueError("LightGBMQuantileBaseline currently supports one-dimensional y.")
+        self.models = []
+        for alpha in self.quantiles:
+            model = lgb.LGBMRegressor(
+                objective="quantile",
+                alpha=float(alpha),
+                n_estimators=self.n_estimators,
+                learning_rate=self.learning_rate,
+                num_leaves=self.num_leaves,
+                min_child_samples=self.min_child_samples,
+                n_jobs=self.n_jobs,
+                random_state=self.seed,
+                verbose=-1,
+            )
+            model.fit(X, y[:, 0])
+            self.models.append(model)
+        return self
+
+    def sample(self, X: ndarray, n_samples: int = 200, seed: int | None = None, **kwargs) -> ndarray:
+        del kwargs
+        rng = np.random.default_rng(seed)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="X does not have valid feature names.*",
+                category=UserWarning,
+            )
+            quantile_preds = np.stack([model.predict(X) for model in self.models], axis=0)
+        quantile_preds = np.sort(quantile_preds, axis=0)
+        uniforms = rng.uniform(size=(n_samples, X.shape[0]))
+        samples = np.empty((n_samples, X.shape[0]), dtype=np.float64)
+        for i in range(X.shape[0]):
+            samples[:, i] = np.interp(uniforms[:, i], self.quantiles, quantile_preds[:, i])
+        return samples[:, :, None]
+
+
+class DeepEnsembleBaseline(ScaledRegressorMixin, SampleBaseline):
+    """Lean PyTorch deep ensemble baseline.
+
+    We use this rather than CARD for the main paper baseline because the old
+    testbed runner documents a CARD/Treeffuser segfault interaction, and CARD's
+    two-stage diffusion training is much heavier. Deep ensembles are a standard,
+    stable neural UQ comparator with tractable CPU runs.
+    """
+
+    def __init__(
+        self,
+        n_ensembles: int = 5,
+        hidden_size: int = 100,
+        n_layers: int = 2,
+        max_epochs: int = 300,
+        learning_rate: float = 1e-3,
+        batch_size: int = 128,
+        patience: int = 20,
+        seed: int | None = None,
+    ) -> None:
+        self.n_ensembles = n_ensembles
+        self.hidden_size = hidden_size
+        self.n_layers = n_layers
+        self.max_epochs = max_epochs
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.patience = patience
+        self.seed = seed
+        self.models = []
+
+    def fit(self, X: ndarray, y: ndarray) -> DeepEnsembleBaseline:
+        torch = _require("torch", "Install the bench extras with pixi before running.")
+        y = _ensure_2d_y(y)
+        X_scaled, y_scaled = self._fit_scalers(X, y)
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_scaled,
+            y_scaled,
+            test_size=0.1,
+            random_state=self.seed,
+        )
+        X_train_t = torch.as_tensor(X_train, dtype=torch.float32)
+        y_train_t = torch.as_tensor(y_train, dtype=torch.float32)
+        X_val_t = torch.as_tensor(X_val, dtype=torch.float32)
+        y_val_t = torch.as_tensor(y_val, dtype=torch.float32)
+        dataset = torch.utils.data.TensorDataset(X_train_t, y_train_t)
+        self.models = []
+        for ensemble_idx in range(self.n_ensembles):
+            if self.seed is not None:
+                torch.manual_seed(self.seed + ensemble_idx)
+            model = _TorchMeanVarianceMLP(
+                x_dim=X_scaled.shape[1],
+                y_dim=y_scaled.shape[1],
+                hidden_size=self.hidden_size,
+                n_layers=self.n_layers,
+            )
+            optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=self.batch_size,
+                shuffle=True,
+                generator=torch.Generator().manual_seed((self.seed or 0) + ensemble_idx),
+            )
+            best_state = None
+            best_loss = math.inf
+            stale_epochs = 0
+            for _ in range(self.max_epochs):
+                model.train()
+                for xb, yb in loader:
+                    optimizer.zero_grad()
+                    mean, var = model(xb)
+                    loss = (0.5 * (torch.log(var) + (yb - mean) ** 2 / var)).mean()
+                    loss.backward()
+                    optimizer.step()
+                model.eval()
+                with torch.no_grad():
+                    mean_val, var_val = model(X_val_t)
+                    val_loss = (0.5 * (torch.log(var_val) + (y_val_t - mean_val) ** 2 / var_val)).mean().item()
+                if val_loss < best_loss:
+                    best_loss = val_loss
+                    best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+                    stale_epochs = 0
+                else:
+                    stale_epochs += 1
+                    if stale_epochs >= self.patience:
+                        break
+            if best_state is not None:
+                model.load_state_dict(best_state)
+            model.eval()
+            self.models.append(model)
+        return self
+
+    def sample(self, X: ndarray, n_samples: int = 200, seed: int | None = None, **kwargs) -> ndarray:
+        del kwargs
+        torch = _require("torch", "Install the bench extras with pixi before running.")
+        rng = np.random.default_rng(seed)
+        X_t = torch.as_tensor(self._transform_x(X), dtype=torch.float32)
+        per_model_samples = []
+        with torch.no_grad():
+            for model in self.models:
+                mean, var = model(X_t)
+                generator = torch.Generator().manual_seed(int(rng.integers(2**31)))
+                noise = torch.randn((n_samples, *mean.shape), generator=generator)
+                per_model_samples.append((mean[None, :, :] + noise * torch.sqrt(var)[None, :, :]).numpy())
+        stacked = np.concatenate(per_model_samples, axis=0)
+        draw_idx = rng.choice(stacked.shape[0], size=n_samples, replace=False)
+        return self._inverse_y(stacked[draw_idx])
+
+
+class _TorchMeanVarianceMLP:
+    def __new__(cls, x_dim: int, y_dim: int, hidden_size: int, n_layers: int):
+        torch = _require("torch", "Install the bench extras with pixi before running.")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                layers = []
+                in_dim = x_dim
+                for _ in range(n_layers):
+                    layers.append(torch.nn.Linear(in_dim, hidden_size))
+                    layers.append(torch.nn.ReLU())
+                    in_dim = hidden_size
+                layers.append(torch.nn.Linear(in_dim, 2 * y_dim))
+                self.net = torch.nn.Sequential(*layers)
+
+            def forward(self, x):
+                raw = self.net(x)
+                mean, raw_var = raw[:, :y_dim], raw[:, y_dim:]
+                return mean, torch.nn.functional.softplus(raw_var) + 1e-6
+
+        return Model()
+
+
+class CatBoostUncertaintyBaseline(SampleBaseline):
+    def __init__(
+        self,
+        iterations: int = 3000,
+        learning_rate: float = 0.05,
+        depth: int = 6,
+        early_stopping_rounds: int = 50,
+        thread_count: int = -1,
+        seed: int | None = None,
+    ) -> None:
+        self.iterations = iterations
+        self.learning_rate = learning_rate
+        self.depth = depth
+        self.early_stopping_rounds = early_stopping_rounds
+        self.thread_count = thread_count
+        self.seed = seed
+        self.model = None
+
+    def fit(self, X: ndarray, y: ndarray) -> CatBoostUncertaintyBaseline:
+        catboost = _require("catboost", "Install the bench extras with pixi before running.")
+        y = _ensure_2d_y(y)
+        if y.shape[1] != 1:
+            raise ValueError("CatBoostUncertaintyBaseline currently supports one-dimensional y.")
+        X_train, X_val, y_train, y_val = train_test_split(
+            X,
+            y[:, 0],
+            test_size=0.1,
+            random_state=self.seed,
+        )
+        self.model = catboost.CatBoostRegressor(
+            loss_function="RMSEWithUncertainty",
+            iterations=self.iterations,
+            learning_rate=self.learning_rate,
+            depth=self.depth,
+            random_seed=self.seed,
+            allow_writing_files=False,
+            thread_count=self.thread_count,
+            verbose=False,
+        )
+        self.model.fit(
+            X_train,
+            y_train,
+            eval_set=(X_val, y_val),
+            early_stopping_rounds=self.early_stopping_rounds,
+            verbose=False,
+        )
+        return self
+
+    def sample(self, X: ndarray, n_samples: int = 200, seed: int | None = None, **kwargs) -> ndarray:
+        del kwargs
+        rng = np.random.default_rng(seed)
+        pred = np.asarray(self.model.predict(X, prediction_type="RMSEWithUncertainty"))
+        mean = pred[:, 0]
+        variance = np.maximum(pred[:, -1], 1e-12)
+        return rng.normal(mean, np.sqrt(variance), size=(n_samples, X.shape[0]))[:, :, None]
+
+
+BASELINE_BUILDERS = {
+    "ngboost": NGBoostGaussianBaseline,
+    "ibug": IBUGXGBoostBaseline,
+    "drf": DistributionalRandomForestBaseline,
+    "qreg_lightgbm": LightGBMQuantileBaseline,
+    "deep_ensemble": DeepEnsembleBaseline,
+    "catboost_uncertainty": CatBoostUncertaintyBaseline,
+}
+
+
+def make_baseline_model(model_type: str, params: dict[str, Any], seed: int):
+    if model_type not in BASELINE_BUILDERS:
+        available = ", ".join(sorted(BASELINE_BUILDERS))
+        raise ValueError(f"Unknown benchmark baseline {model_type!r}. Available: {available}.")
+    kwargs = dict(params)
+    kwargs["seed"] = seed
+    return BASELINE_BUILDERS[model_type](**kwargs)

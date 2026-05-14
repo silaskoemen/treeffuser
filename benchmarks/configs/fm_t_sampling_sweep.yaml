@@ -1,0 +1,293 @@
+# FM t-sampling ablation (v2). Addresses two confounds from v1:
+#
+# (a) `LogBetaNormalFlowMatchingTSampler` clips at log beta = 0 because beta(t) <= 1
+#     on every flow path; with (p_mean=-1.2, p_std=1.2) about 15.9% of draws land
+#     exactly at t=1. The v1 sweep therefore partly tested "more endpoint anchoring"
+#     rather than just "smoother log-noise density." We now compare against
+#     `vp_fm_ode_uniform_anchor16` (matched endpoint fraction with otherwise uniform
+#     t) and against `LogSNRNormalFlowMatchingTSampler`, whose log-SNR axis has full
+#     real-line range so the Normal is not upper-bound-clipped.
+#
+# (b) The v1 sweep had no score-side reference variants in the same run, so the
+#     "did FM get the same t-sampling lift score got?" question relied on a
+#     cross-run historical comparison. We now include `treeffuser_score_combo` with
+#     both uniform and log-sigma t-sampling so the cross-objective comparison is
+#     in-sweep.
+#
+# All FM variants use VP path + residualizer-C (the v2 headline FM configuration).
+
+seeds: [0, 1, 2]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  - name: yacht
+    n_train: 277
+    n_test: 31
+  - name: concrete
+    n_train: 927
+    n_test: 103
+  - name: energy
+    n_train: 691
+    n_test: 77
+  - name: diabetes
+    n_train: 400
+    n_test: 42
+  - name: wine
+    n_train: 5847
+    n_test: 650
+  - name: kin8nm
+    n_train: 5000
+    n_test: 1000
+  - name: power_plant
+    n_train: 8611
+    n_test: 957
+  - name: naval
+    n_train: 10741
+    n_test: 1193
+  - name: california_housing
+    n_train: 8000
+    n_test: 2000
+  - name: protein
+    n_train: 5000
+    n_test: 1500
+
+variants:
+  # ----- FM: VP + ODE + residualizer-C × {t-sampling}
+  - name: vp_fm_ode_uniform
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: uniform
+      uniform_endpoint_fraction: 0.05
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  # Endpoint-matched control: same uniform sampler but with 15.9% anchor rate
+  # so the comparison against logbeta is on density shape only, not endpoint mass.
+  - name: vp_fm_ode_uniform_anchor16
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: uniform
+      uniform_endpoint_fraction: 0.159
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_ode_logbeta_default
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_sigma_normal
+      log_sigma_p_mean: -1.2
+      log_sigma_p_std: 1.2
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_ode_logsnr_default
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_snr_normal
+      log_sigma_p_mean: 0.0
+      log_sigma_p_std: 2.0
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+
+  # ----- FM: VP + SDE (stoch=1.0 linear) + residualizer-C × {t-sampling}
+  - name: vp_fm_sde_uniform
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: uniform
+      uniform_endpoint_fraction: 0.05
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_sde_logbeta_default
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_sigma_normal
+      log_sigma_p_mean: -1.2
+      log_sigma_p_std: 1.2
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: vp_fm_sde_logsnr_default
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_snr_normal
+      log_sigma_p_mean: 0.0
+      log_sigma_p_std: 2.0
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+
+  # ----- Score reference: same residualizer + EDM combo with uniform vs log-sigma t
+  - name: score_combo_uniform_t
+    params:
+      training_objective: score
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: uniform
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      sde_hyperparam_min: 0.01
+      sde_hyperparam_max: 20.0
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: score_combo_logsigma_t
+    params:
+      training_objective: score
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_sigma_normal
+      log_sigma_p_mean: -1.2
+      log_sigma_p_std: 1.2
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      sde_hyperparam_min: 0.01
+      sde_hyperparam_max: 20.0
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+
+samplers:
+  # FM ODE @ 5 steps
+  - n_samples: 200
+    n_steps: 5
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 0.0
+    velocity_stochasticity_schedule: linear
+    variants:
+      - vp_fm_ode_uniform
+      - vp_fm_ode_uniform_anchor16
+      - vp_fm_ode_logbeta_default
+      - vp_fm_ode_logsnr_default
+
+  # FM SDE @ 25 steps
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: linear
+    variants:
+      - vp_fm_sde_uniform
+      - vp_fm_sde_logbeta_default
+      - vp_fm_sde_logsnr_default
+
+  # Score reference: Heun PF-ODE @ 25 steps
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: true
+    variants:
+      - score_combo_uniform_t
+      - score_combo_logsigma_t

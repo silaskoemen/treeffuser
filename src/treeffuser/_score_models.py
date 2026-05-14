@@ -794,6 +794,165 @@ def _sample_flow_matching_t(n: int, rng: np.random.Generator) -> Float[np.ndarra
     return t
 
 
+class FlowMatchingTSampler(abc.ABC):
+    """Distribution from which training-time `t` values are drawn for flow matching.
+
+    Tree-based velocity models bin features by data density, so the t distribution
+    directly determines where the regressor spends capacity. This mirrors the score
+    side's `TSampler` family and yields the FM analog of EDM-style log-sigma sampling.
+    """
+
+    @property
+    @abc.abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abc.abstractmethod
+    def sample(self, n: int, flow_path: FlowPath, rng: np.random.Generator) -> Float[np.ndarray, "n 1"]:
+        pass
+
+
+class UniformFlowMatchingTSampler(FlowMatchingTSampler):
+    """Uniform t on [EPS, 1] with an optional random anchor at t=1 (reproduces the
+    historical FM default with endpoint coverage)."""
+
+    def __init__(self, endpoint_fraction: float = _FLOW_MATCHING_ENDPOINT_FRACTION) -> None:
+        if not 0.0 <= endpoint_fraction <= 1.0:
+            raise ValueError("endpoint_fraction must lie in [0, 1].")
+        self.endpoint_fraction = float(endpoint_fraction)
+
+    @property
+    def name(self) -> str:
+        return f"uniform_anchor{self.endpoint_fraction:g}"
+
+    def sample(self, n: int, flow_path: FlowPath, rng: np.random.Generator) -> Float[np.ndarray, "n 1"]:
+        del flow_path
+        t = rng.uniform(_FLOW_MATCHING_T_EPS, 1.0, size=(n, 1))
+        anchor_count = max(1, round(n * self.endpoint_fraction)) if (n > 0 and self.endpoint_fraction > 0) else 0
+        if anchor_count > 0:
+            anchor_idx = rng.choice(n, size=anchor_count, replace=False)
+            t[anchor_idx] = 1.0
+        return t
+
+
+class LogBetaNormalFlowMatchingTSampler(FlowMatchingTSampler):
+    """Flow-matching analog of `LogSigmaNormalTSampler`.
+
+    Draws log beta(t) ~ Normal(p_mean, p_std), clips to [log beta(EPS), log beta(1)],
+    inverts via a precomputed t -> beta(t) lookup. For linear FM beta(t)=t, for trig
+    beta(t)=sin(pi t/2), for VP beta(t)=sqrt(1-alpha_bar(t)) - all monotone in t.
+    """
+
+    def __init__(
+        self,
+        p_mean: float = -1.2,
+        p_std: float = 1.2,
+        table_size: int = 1024,
+    ) -> None:
+        if p_std <= 0:
+            raise ValueError("p_std must be strictly positive.")
+        if table_size < 16:
+            raise ValueError("table_size must be at least 16.")
+        self.p_mean = float(p_mean)
+        self.p_std = float(p_std)
+        self.table_size = int(table_size)
+
+    @property
+    def name(self) -> str:
+        return f"log_beta_normal_pm{self.p_mean:g}_ps{self.p_std:g}"
+
+    def _build_table(self, flow_path: FlowPath) -> tuple[np.ndarray, np.ndarray]:
+        t_grid = np.linspace(_FLOW_MATCHING_T_EPS, 1.0, self.table_size).reshape(-1, 1)
+        beta_col = flow_path.noise_scale(t_grid)[:, 0]
+        if np.any(beta_col <= 0):
+            raise ValueError("LogBetaNormalFlowMatchingTSampler requires noise_scale(t) > 0 on [EPS, 1].")
+        log_beta_grid = np.log(beta_col)
+        order = np.argsort(log_beta_grid)
+        return log_beta_grid[order], t_grid[:, 0][order]
+
+    def sample(self, n: int, flow_path: FlowPath, rng: np.random.Generator) -> Float[np.ndarray, "n 1"]:
+        log_beta_grid, t_grid = self._build_table(flow_path)
+        log_beta = rng.normal(loc=self.p_mean, scale=self.p_std, size=n)
+        log_beta = np.clip(log_beta, log_beta_grid[0], log_beta_grid[-1])
+        t = np.interp(log_beta, log_beta_grid, t_grid)
+        return t.reshape(-1, 1)
+
+
+class LogSNRNormalFlowMatchingTSampler(FlowMatchingTSampler):
+    """log-SNR sampler: draws log(alpha(t)/beta(t)) ~ Normal(p_mean, p_std).
+
+    Compared to `LogBetaNormalFlowMatchingTSampler`, log-SNR has full real-line
+    range so the Normal is not clipped at one end. This is the cleaner direct
+    analog of score-side EDM-style log-sigma sampling: log SNR plays the same
+    "where is most of the noise mass" role for tree-based velocity learning
+    that log sigma does for the score side.
+
+    For linear FM, log SNR = log((1-t)/t) and is monotone decreasing in t over
+    (0, 1). For trig and VP, the same monotone-decreasing structure holds via
+    `alpha(t)/beta(t)`. Inversion uses a precomputed lookup over [EPS, 1-EPS].
+    """
+
+    def __init__(self, p_mean: float = 0.0, p_std: float = 2.0, table_size: int = 1024) -> None:
+        if p_std <= 0:
+            raise ValueError("p_std must be strictly positive.")
+        if table_size < 16:
+            raise ValueError("table_size must be at least 16.")
+        self.p_mean = float(p_mean)
+        self.p_std = float(p_std)
+        self.table_size = int(table_size)
+
+    @property
+    def name(self) -> str:
+        return f"log_snr_normal_pm{self.p_mean:g}_ps{self.p_std:g}"
+
+    def _build_table(self, flow_path: FlowPath) -> tuple[np.ndarray, np.ndarray]:
+        # Avoid both endpoints so log(alpha/beta) stays finite.
+        t_grid = np.linspace(_FLOW_MATCHING_T_EPS, 1.0 - _FLOW_MATCHING_T_EPS, self.table_size).reshape(-1, 1)
+        alpha = flow_path.signal_scale(t_grid)[:, 0]
+        beta = flow_path.noise_scale(t_grid)[:, 0]
+        if np.any(alpha <= 0) or np.any(beta <= 0):
+            raise ValueError(
+                "LogSNRNormalFlowMatchingTSampler requires signal_scale(t) > 0 and "
+                "noise_scale(t) > 0 on (EPS, 1 - EPS)."
+            )
+        log_snr_grid = np.log(alpha) - np.log(beta)
+        # log SNR is monotone DECREASING in t; sort ascending to use np.interp.
+        order = np.argsort(log_snr_grid)
+        return log_snr_grid[order], t_grid[:, 0][order]
+
+    def sample(self, n: int, flow_path: FlowPath, rng: np.random.Generator) -> Float[np.ndarray, "n 1"]:
+        log_snr_grid, t_grid = self._build_table(flow_path)
+        log_snr = rng.normal(loc=self.p_mean, scale=self.p_std, size=n)
+        log_snr = np.clip(log_snr, log_snr_grid[0], log_snr_grid[-1])
+        t = np.interp(log_snr, log_snr_grid, t_grid)
+        return t.reshape(-1, 1)
+
+
+def get_flow_matching_t_sampler(
+    spec: str | FlowMatchingTSampler,
+    log_sigma_p_mean: float = -1.2,
+    log_sigma_p_std: float = 1.2,
+    uniform_endpoint_fraction: float = _FLOW_MATCHING_ENDPOINT_FRACTION,
+) -> FlowMatchingTSampler:
+    if isinstance(spec, FlowMatchingTSampler):
+        return spec
+    if spec == "uniform":
+        return UniformFlowMatchingTSampler(endpoint_fraction=uniform_endpoint_fraction)
+    if spec in ("log_beta_normal", "log_sigma_normal"):
+        # `log_sigma_normal` is accepted as an alias so configs can share parameter
+        # names with the score side; semantically this samples log of the path's
+        # beta(t). Note: beta(t) <= 1 across all paths, so log-beta is bounded above
+        # by 0 and Normal draws with p_mean + 1 sigma > 0 are clipped at t=1.
+        return LogBetaNormalFlowMatchingTSampler(p_mean=log_sigma_p_mean, p_std=log_sigma_p_std)
+    if spec == "log_snr_normal":
+        # log SNR = log(alpha/beta) has full real-line range; no upper-bound clipping.
+        # Use the same parameter names for ergonomic config sharing, but defaults
+        # differ (p_mean=0, p_std=2 here vs -1.2, 1.2 for log-sigma) because the
+        # SNR axis is centered differently from the noise axis.
+        return LogSNRNormalFlowMatchingTSampler(p_mean=log_sigma_p_mean, p_std=log_sigma_p_std)
+    raise ValueError(f"Unknown flow-matching t sampler: {spec!r}")
+
+
 def _make_flow_matching_training_data(
     X: Float[np.ndarray, "batch x_dim"],
     y: Float[np.ndarray, "batch y_dim"],
@@ -803,16 +962,20 @@ def _make_flow_matching_training_data(
     cat_idx: list[int] | None = None,
     seed: int | None = None,
     noise_feature_builder: NoiseFeatureBuilder | None = None,
+    t_sampler: FlowMatchingTSampler | None = None,
 ):
     """
-    Creates LightGBM training rows for linear flow matching.
+    Creates LightGBM training rows for flow matching.
 
     The validation split is made on original `(X, y0)` rows before repeats and
     prior-noise draws, matching `_make_training_data` and avoiding leakage between
-    noisy views of the same data point.
+    noisy views of the same data point. `t_sampler` controls the training-time
+    distribution of t; default reproduces the original uniform-with-endpoint-anchor.
     """
     if noise_feature_builder is None:
         noise_feature_builder = RawTimeFeatureBuilder()
+    if t_sampler is None:
+        t_sampler = UniformFlowMatchingTSampler()
     rng = np.random.default_rng(seed)
 
     X_train, X_test, y_train, y_test = X, None, y, None
@@ -825,7 +988,7 @@ def _make_flow_matching_training_data(
     n_reps = n_repeats if n_repeats is not None else 1
     X_train = np.tile(X_train, (n_reps, 1))
     y_train = np.tile(y_train, (n_reps, 1))
-    t_train = _sample_flow_matching_t(y_train.shape[0], rng)
+    t_train = t_sampler.sample(y_train.shape[0], flow_path, rng)
     z_train = flow_path.sample_prior(y_train.shape, rng=rng)
     y_t_train = flow_path.interpolate(y0=y_train, z=z_train, t=t_train)
     predictors_train = noise_feature_builder.make_features(
@@ -839,7 +1002,7 @@ def _make_flow_matching_training_data(
     if eval_percent is not None:
         assert y_test is not None
         assert X_test is not None
-        t_val = _sample_flow_matching_t(y_test.shape[0], rng)
+        t_val = t_sampler.sample(y_test.shape[0], flow_path, rng)
         z_val = flow_path.sample_prior(y_test.shape, rng=rng)
         y_t_val = flow_path.interpolate(y0=y_test, z=z_val, t=t_val)
         predictors_val = noise_feature_builder.make_features(
@@ -1136,6 +1299,10 @@ class LightGBMVelocityModel(VelocityModel):
         seed: int | None = None,
         flow_path: str | FlowPath = "linear",
         noise_features: str | NoiseFeatureBuilder = "raw_time",
+        t_sampling: str | FlowMatchingTSampler = "uniform",
+        log_sigma_p_mean: float = -1.2,
+        log_sigma_p_std: float = 1.2,
+        uniform_endpoint_fraction: float = _FLOW_MATCHING_ENDPOINT_FRACTION,
         verbose: int = 0,
         **lgbm_args,
     ) -> None:
@@ -1147,6 +1314,12 @@ class LightGBMVelocityModel(VelocityModel):
         self.noise_feature_builder = get_noise_feature_builder(noise_features)
         if not isinstance(self.noise_feature_builder, RawTimeFeatureBuilder):
             raise ValueError("Flow matching currently supports only noise_features='raw_time'.")
+        self.t_sampler = get_flow_matching_t_sampler(
+            t_sampling,
+            log_sigma_p_mean=log_sigma_p_mean,
+            log_sigma_p_std=log_sigma_p_std,
+            uniform_endpoint_fraction=uniform_endpoint_fraction,
+        )
         self.verbose = verbose
         self._lgbm_args = lgbm_args
         self.models = None
@@ -1208,6 +1381,7 @@ class LightGBMVelocityModel(VelocityModel):
             cat_idx=cat_idx,
             seed=self.seed,
             noise_feature_builder=self.noise_feature_builder,
+            t_sampler=self.t_sampler,
         )
 
         models = []

@@ -1,0 +1,186 @@
+# Paper-grade real-data comparison. Five variants run on 10 canonical UCI
+# probabilistic-regression benchmarks plus an existing real-estate set:
+#
+#   1. treeffuser_published:    the originally published Treeffuser (score model,
+#                               noise parameterization, raw-time features, no
+#                               residualization, no EDM, uniform t-sampling,
+#                               Euler reverse-SDE @ 50 steps). The "before" of
+#                               our improvements track.
+#   2. treeffuser_score_combo:  our strongest score variant (residualization-C,
+#                               EDM, log-sigma sampling, raw_time_log_std,
+#                               Heun PF-ODE @ 25 steps). The score-side
+#                               contribution above the original baseline.
+#   3. linear_fm_sde:           linear flow path + stochastic-interpolant SDE
+#                               (linear stochasticity schedule, stoch=1.0).
+#   4. vp_fm_ode:               VP flow path + deterministic ODE sampling at
+#                               5 steps. Latency-optimal FM operating point.
+#   5. vp_fm_sde:               VP flow path + SDE (linear schedule, stoch=1.0)
+#                               at 25 steps. Tail-calibration-optimal FM.
+#
+# Each row records CRPS, CRPS_climatology (empirical y_train marginal CRPS) and
+# the derived CRPS skill score. Downstream analysis computes
+# relative-to-best CRPS per dataset.
+
+seeds: [0, 1, 2]
+
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+
+datasets:
+  # Small (n<1.5k): low-data regime.
+  - name: yacht
+    n_train: 277
+    n_test: 31
+  - name: concrete
+    n_train: 927
+    n_test: 103
+  - name: energy
+    n_train: 691
+    n_test: 77
+  - name: diabetes
+    n_train: 400
+    n_test: 42
+  # Medium (1.5k <= n < 15k).
+  - name: wine
+    n_train: 5847
+    n_test: 650
+  - name: kin8nm
+    n_train: 5000
+    n_test: 1000
+  - name: power_plant
+    n_train: 8611
+    n_test: 957
+  - name: naval
+    n_train: 10741
+    n_test: 1193
+  - name: california_housing
+    n_train: 8000
+    n_test: 2000
+  # Large (n >= 15k); subsampled for sweep budget.
+  - name: protein
+    n_train: 5000
+    n_test: 1500
+
+variants:
+  - name: treeffuser_published
+    params:
+      training_objective: score
+      score_parameterization: noise
+      noise_features: raw_time
+      t_sampling: uniform
+      residualize: "off"
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      verbose: -1
+  - name: treeffuser_score_combo
+    params:
+      training_objective: score
+      score_parameterization: edm
+      noise_features: raw_time_log_std
+      residualize: mean
+      residualize_k_folds: 5
+      t_sampling: log_sigma_normal
+      log_sigma_p_mean: -1.2
+      log_sigma_p_std: 1.2
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      sde_name: vesde
+      sde_hyperparam_min: 0.01
+      sde_hyperparam_max: 20.0
+      verbose: -1
+      extra_residualizer_params:
+        n_estimators: 300
+        learning_rate: 0.05
+        max_depth: -1
+        num_leaves: 63
+        min_child_samples: 10
+  - name: linear_fm_sde
+    params:
+      training_objective: flow_matching
+      flow_path: linear
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+  - name: vp_fm_ode
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+  - name: vp_fm_sde
+    params:
+      training_objective: flow_matching
+      flow_path: vp
+      noise_features: raw_time
+      residualize: mean
+      residualize_k_folds: 5
+      n_repeats: 30
+      n_estimators: 3000
+      early_stopping_rounds: 50
+      learning_rate: 0.1
+      verbose: -1
+
+samplers:
+  # treeffuser_published: original Euler reverse-SDE @ 50 steps (paper default).
+  - n_samples: 200
+    n_steps: 50
+    n_parallel: 20
+    method: euler
+    pf_ode: false
+    variants: [treeffuser_published]
+
+  # treeffuser_score_combo: Heun PF-ODE @ 25 steps.
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: true
+    variants: [treeffuser_score_combo]
+
+  # FM-linear with SDE (stochastic-interpolant linear schedule).
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: linear
+    variants: [linear_fm_sde]
+
+  # FM-VP with ODE at 5 steps (latency-optimal).
+  - n_samples: 200
+    n_steps: 5
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 0.0
+    velocity_stochasticity_schedule: linear
+    variants: [vp_fm_ode]
+
+  # FM-VP with SDE-linear at 25 steps (tail-calibration-optimal).
+  - n_samples: 200
+    n_steps: 25
+    n_parallel: 20
+    method: heun
+    pf_ode: false
+    velocity_stochasticity: 1.0
+    velocity_stochasticity_schedule: linear
+    variants: [vp_fm_sde]

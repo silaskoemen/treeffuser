@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+import sys
 
 import numpy as np
 from jaxtyping import Float
@@ -181,9 +183,99 @@ def _split_real_dataset(
     )
 
 
+def _load_testbed_dataset(name: str, n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    """Load a preprocessed dataset from the local `testbed` package."""
+    testbed_src = Path(__file__).resolve().parents[1] / "testbed" / "src"
+    if str(testbed_src) not in sys.path:
+        sys.path.insert(0, str(testbed_src))
+    from testbed.data.utils import get_data
+
+    d = get_data(name, verbose=False)
+    X = np.asarray(d["x"], dtype=np.float64)
+    y = np.asarray(d["y"], dtype=np.float64)
+    if y.ndim == 1:
+        y = y.reshape(-1, 1)
+    if y.shape[1] > 1:
+        y = y[:, :1]
+    return _split_real_dataset(name=name, X=X, y=y, n_train=n_train, n_test=n_test, seed=seed)
+
+
+def _load_ucimlrepo_dataset(
+    name: str, uci_id: int, target_col: str, n_train: int, n_test: int, seed: int
+) -> DatasetBundle:
+    """Load a UCI dataset via the `ucimlrepo` API. Picks a single target column."""
+    from ucimlrepo import fetch_ucirepo
+
+    ds = fetch_ucirepo(id=uci_id)
+    X = ds.data.features.to_numpy(dtype=np.float64)
+    y = ds.data.targets[target_col].to_numpy(dtype=np.float64).reshape(-1, 1)
+    return _split_real_dataset(name=name, X=X, y=y, n_train=n_train, n_test=n_test, seed=seed)
+
+
+def _yacht(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    return _load_testbed_dataset("yacht", n_train, n_test, seed)
+
+
+def _concrete(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    return _load_ucimlrepo_dataset(
+        "concrete",
+        uci_id=165,
+        target_col="Concrete compressive strength",
+        n_train=n_train,
+        n_test=n_test,
+        seed=seed,
+    )
+
+
+def _energy(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    # Two targets: Y1 (heating load) and Y2 (cooling load). Use Y1 by paper convention.
+    return _load_ucimlrepo_dataset(
+        "energy",
+        uci_id=242,
+        target_col="Y1",
+        n_train=n_train,
+        n_test=n_test,
+        seed=seed,
+    )
+
+
+def _wine(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    # Testbed `wine` is the combined red+white set with a categorical color flag (idx 11).
+    # We treat it as a continuous feature; LightGBM can still split on it cleanly.
+    return _load_testbed_dataset("wine", n_train, n_test, seed)
+
+
+def _power_plant(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    return _load_ucimlrepo_dataset(
+        "power_plant",
+        uci_id=294,
+        target_col="PE",
+        n_train=n_train,
+        n_test=n_test,
+        seed=seed,
+    )
+
+
+def _naval(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    return _load_testbed_dataset("naval", n_train, n_test, seed)
+
+
+def _protein(n_train: int, n_test: int, seed: int) -> DatasetBundle:
+    return _load_testbed_dataset("protein", n_train, n_test, seed)
+
+
 REAL_DATASETS = {
+    # Pre-existing
     "diabetes": _diabetes,
     "california_housing": _california_housing,
     "kin8nm": _kin8nm,
     "wine_quality_white": _wine_quality_white,
+    # Canonical UCI probabilistic-regression benchmarks
+    "yacht": _yacht,
+    "concrete": _concrete,
+    "energy": _energy,
+    "wine": _wine,
+    "power_plant": _power_plant,
+    "naval": _naval,
+    "protein": _protein,
 }

@@ -1,0 +1,148 @@
+\documentclass{uai2026}
+
+\usepackage[american]{babel}
+\usepackage{natbib}
+    \bibliographystyle{plainnat}
+    \renewcommand{\bibsection}{\subsubsection*{References}}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage{microtype}
+
+%% Macros
+\newcommand{\crps}{\mathrm{CRPS}}
+\newcommand{\crpss}{\mathrm{CRPSS}}
+\newcommand{\dss}{\mathrm{DSS}}
+\newcommand{\mse}{\mathrm{MSE}}
+\newcommand{\rmse}{\mathrm{RMSE}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Norm}{\mathcal{N}}
+\newcommand{\dd}{\mathrm{d}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+\title{Tree-Based Stochastic Interpolants for Probabilistic Tabular Regression}
+
+\author[1]{Anonymous~Authors}
+\affil[1]{Anonymous Institution}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We extend Treeffuser, a score-based diffusion model for probabilistic tabular regression with gradient-boosted trees, in two complementary directions. First, on the score-training side, we add conditional-mean residualization with a high-capacity inner model, an EDM-style preconditioning, log-sigma time sampling, and noise-level features; together these reduce mean coverage error at the 95\% nominal level from 0.029 to 0.026 and cut sampling time 4.8$\times$ over the published baseline. Second, we replace score matching with flow matching using Gaussian probability paths, derive a closed-form mapping from learned velocity to implied score, and benchmark a one-parameter family of stochastic-interpolant samplers indexed by stochasticity strength. With a VP path and deterministic Heun ODE at five steps, the flow-matching variant ties our improved score model on CRPS skill score while reducing 95\% tail coverage error by 42\% and sampling time by a further 1.8$\times$. Stochastic ($\varepsilon > 0$) samplers do not Pareto-dominate the deterministic corner on any aggregate metric across ten UCI benchmarks, so the empirical recommendation is the $\varepsilon = 0$ specialization of the family.
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+Probabilistic regression on tabular data must combine the predictive strength of gradient-boosted trees with full predictive distributions usable for calibration, decision-making, and uncertainty quantification. Treeffuser~\citep{treeffuser} achieves this by training LightGBM~\citep{ke2017lightgbm} regressors to estimate the score of a noise-perturbed conditional density and integrating the corresponding reverse-time stochastic differential equation (SDE)~\citep{song2021score} at inference. The framework inherits the calibration properties of score-based diffusion while avoiding neural-network density estimators.
+
+This paper develops Treeffuser along two axes that interact with the tree-based score regressor in ways that differ from the neural-network case. \emph{First}, on the score-training side, we introduce four small modifications motivated by the histogram-bin density structure of tree learners. \emph{Second}, we replace score matching with flow matching using Gaussian probability paths~\citep{lipman2023flow,liu2023rectified}, which removes the indirect score-to-drift mapping that score-matching imposes on tree predictions and opens access to the stochastic-interpolant family~\citep{albergo2023stochastic}, parameterized by a non-negative stochasticity schedule $\varepsilon(t)$ that interpolates between the deterministic ODE sampler ($\varepsilon \equiv 0$) and the score-based reverse SDE.
+
+Across ten canonical UCI probabilistic-regression benchmarks, the score-side modifications close most of the gap between the published Treeffuser and a strong score baseline; flow matching then matches the improved score model on CRPS skill score while improving 90/95\% interval coverage error by 37--42\% and reducing sampling time by another 1.8$\times$. Stochastic samplers ($\varepsilon > 0$) do not Pareto-dominate the deterministic ODE corner on any aggregate metric, so the empirical recommendation collapses the one-parameter family to $\varepsilon = 0$.
+
+\section{Method}\label{sec:method}
+
+\subsection{Score-Side Modifications}\label{sec:score-side}
+The published Treeffuser uses VESDE marginals with uniform $t$ sampling, a noise-prediction target, and a feature layout $[\,y_t,\,X,\,t\,]$ given to LightGBM. We change four pieces, each motivated by tree-based regression rather than borrowed wholesale from neural diffusion.
+
+\paragraph{Conditional-mean residualization.} We fit a cross-validated LightGBM mean predictor $\hat{\mu}(x)$ on the training data and apply diffusion to $y - \hat{\mu}(x)$ rather than $y$ directly. This converts a heteroscedastic conditional density into one whose mode is approximately zero and whose remaining variation is scale only, which empirically simplifies the score-regression target. We use a high-capacity configuration (no depth cap, 63 leaves, $n_{\text{est}}{=}300$, $\eta{=}0.05$) chosen by a separate sweep.
+
+\paragraph{EDM preconditioning.} Following \citet{karras2022edm}, we predict a denoised target $D_\theta(y_t, t)$ scaled to unit variance across noise levels and reconstruct the score $s(y_t, t) = (D_\theta - y_t)/\sigma(t)^2$. This stabilizes the regression target for trees, which would otherwise need to extrapolate noise-prediction magnitudes across $t$.
+
+\paragraph{Log-sigma time sampling.} We draw $\log\sigma(t) \sim \Norm(-1.2, 1.2^2)$, clip to the SDE's achievable range, and invert. Trees bin features by data density, so the distribution of training $t$ values directly controls where the score model spends capacity. This is a stronger lever than loss reweighting~\citep{hang2023minsnr}, which scales loss within fixed bins.
+
+\paragraph{Log-sigma noise feature.} The feature vector for LightGBM becomes $[\,y_t,\,X,\,t,\,\log\sigma(t)\,]$, giving the regressor an explicit noise-level signal aligned with EDM scaling.
+
+\subsection{Flow Matching with Gaussian Paths}\label{sec:fm}
+A Gaussian flow path interpolates data $y_0$ and a standard-normal prior $z$ via
+\begin{equation}\label{eq:path}
+y_t = \alpha(t)\, y_0 + \beta(t)\, z, \quad t \in [0,1],
+\end{equation}
+with boundary conditions $\alpha(0)=1$, $\alpha(1)=0$, $\beta(0)=0$, $\beta(1)=1$. We compare three paths: \emph{linear} ($\alpha = 1-t$, $\beta = t$), \emph{trigonometric} ($\alpha = \cos(\pi t/2)$, $\beta = \sin(\pi t /2)$), and a \emph{VP} schedule with linear $\beta_t$ giving $\alpha^2(t) = \exp(-T(t))$, $T(t) = \tfrac{1}{2}\beta_{\min} t + \tfrac{1}{4}(\beta_{\max} - \beta_{\min}) t^2$. The training target is the conditional velocity $u_t = \alpha'(t) y_0 + \beta'(t) z$, regressed against the model's $v_\theta(y_t, x, t)$.
+
+\paragraph{Velocity-to-score formula.} For any Gaussian path with Wronskian $W(t) = \alpha(t) \beta'(t) - \alpha'(t) \beta(t)$, the marginal score is recoverable in closed form:
+\begin{equation}\label{eq:score}
+\nabla \log p_t(y_t) \;=\; \frac{\alpha'(t)\, y_t - \alpha(t)\, v_\theta(y_t, x, t)}{W(t)\,\beta(t)}.
+\end{equation}
+For linear FM this reduces to $-(y_t + (1-t) v)/t$; for trig to $-y_t - (2/\pi)\cot(\pi t/2) v$.
+
+\paragraph{Stochastic-interpolant family.} \citet{albergo2023stochastic} show that any non-negative $\varepsilon(t)$ defines a marginal-preserving reverse-time sampler
+\begin{equation}\label{eq:sde}
+\dd y_s = \left(-v_\theta + \tfrac{\varepsilon^2}{2}\, s\right) \dd s + \varepsilon\, \dd W_s,
+\end{equation}
+where $s = 1 - t$ is reverse time and $s$ in the drift is the score from \eqref{eq:score}. The choice $\varepsilon \equiv 0$ recovers the deterministic probability-flow ODE; positive $\varepsilon(t)$ broadens samples while preserving marginals (exactly for the true velocity; approximately for an approximate $v_\theta$). We use the schedule $\varepsilon(t) = c\, t$, which vanishes at the data endpoint where the score's $1/\beta(t)$ factor would otherwise dominate.
+
+\subsection{Implementation Notes}\label{sec:impl}
+The flow-matching code reuses Treeffuser's per-output-dimension LightGBM fitter and feature-construction pipeline; only the target and prior change. Sampling uses the same Heun integrator as the score path. The residualizer is unchanged across score and FM variants---a single conditional mean is used regardless of objective. At sample time, samples are inverse-transformed through the residualizer to recover the original $y$ scale.
+
+\section{Experiments}\label{sec:exp}
+
+\paragraph{Datasets and protocol.} Ten UCI benchmarks (Table~\ref{tab:per-dataset}) with 3 seeds and a fixed train/test split ($\sim$90/10, capped at $n_{\text{train}} = 5000$ on protein). For each test point we draw 200 samples via Heun integration; metrics are averaged over the test set, seeds, and (for the headline) datasets.
+
+\paragraph{Metrics.} We report CRPS skill score $\crpss = 1 - \crps_{\text{model}} / \crps_{\text{climatology}}$, where climatology is the empirical CDF of $y_{\text{train}}$; mean rel-CRPS (per-dataset CRPS divided by the best variant on that dataset, then averaged); the Dawid--Sebastiani score~\citep{dawid1984pit}; the fraction of (dataset, seed) pairs at which a Kolmogorov--Smirnov test on the probability integral transform fails to reject uniformity at $\alpha=0.05$ ("PIT KS $p{>}.05$"); absolute coverage error at the 50/90/95\% nominal interval levels~\citep{gneiting2007crps}; and mean per-batch sample time.
+
+\paragraph{Variants compared.} Three rows attribute contributions cleanly: (1)~\textsc{Tree\-ffuser-published}---the original baseline with noise-prediction, uniform $t$, no residualization; (2)~\textsc{Tree\-ffuser-score+}---the published baseline plus the four modifications of \S\ref{sec:score-side}; (3)~\textsc{Tree\-ffuser-FM}---flow matching on the VP path with residualizer-C and a Heun ODE sampler at $n_{\text{steps}}=5$. All three share the LightGBM size ($n_{\text{est}}{=}3000$, ES at 50 rounds), $n_{\text{repeats}}=30$, and inverse residualization.
+
+\begin{table*}[!t]
+  \centering
+  \caption{Headline real-data results, mean over 10 UCI benchmarks $\times$ 3 seeds. CRPSS is in $(-\infty, 1]$ with $0$ meaning ``no better than the marginal climatology forecast'' and $1$ meaning ``perfect.'' rel-CRPS is the per-dataset CRPS divided by the best variant on that dataset; smaller is better. $|\text{cE}|$@$q$ is the absolute coverage error at the $q$\% nominal level.}\label{tab:headline}
+  \footnotesize
+  \begin{tabular}{lrrrrrrrr}
+    \toprule
+    Variant & CRPSS $\uparrow$ & rel-CRPS $\downarrow$ & DSS $\downarrow$ & KS $p{>}.05$ $\uparrow$ & $|\text{cE}|$@50 $\downarrow$ & $|\text{cE}|$@90 $\downarrow$ & $|\text{cE}|$@95 $\downarrow$ & samp.\ time \\
+    \midrule
+    Treeffuser-published & 0.639 & 1.215 & 1.136 & 0.27 & 0.140 & 0.053 & 0.029 & 26.4\,s \\
+    Treeffuser-score$^+$ (ours) & \textbf{0.657} & 1.026 & \textbf{$-$0.169} & \textbf{0.70} & \textbf{0.069} & 0.038 & 0.026 & 5.51\,s \\
+    Treeffuser-FM (ours) & 0.656 & \textbf{1.025} & $-$0.154 & 0.47 & 0.087 & \textbf{0.024} & \textbf{0.015} & \textbf{3.07\,s} \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsection{Headline Result}\label{sec:headline}
+Table~\ref{tab:headline} reports cross-dataset means. Two relative improvements attribute the contributions cleanly. The score-side modifications (\textsc{Tree\-ffuser-score$^+$} vs.\ the published baseline) lift CRPSS from 0.639 to 0.657, raise the PIT-uniformity pass rate from 0.27 to 0.70, and cut sample time 4.8$\times$. The flow-matching contribution (\textsc{Tree\-ffuser-FM} vs.\ \textsc{Tree\-ffuser-score$^+$}) ties CRPSS (0.656 vs.\ 0.657, within Monte-Carlo noise), Pareto-improves coverage error at 90\% and 95\% by 37 and 42\% respectively, and shaves another 1.8$\times$ from sampling time. The two contributions remain useful in different ways: the score model has a sharper Dawid--Sebastiani score and better median-interval coverage, while the FM model has tighter tail coverage and faster sampling.
+
+\subsection{Per-Dataset CRPSS}\label{sec:perdata}
+Table~\ref{tab:per-dataset} shows the per-dataset CRPSS. Both improved variants beat the published baseline on every dataset except \texttt{wine}, where its categorical color flag interacts adversely with the residualizer. The FM and score variants split the remaining datasets: FM wins 5/10 on raw CRPS (concrete, energy, diabetes, kin8nm, naval), the score combo wins 4/10, and they tie on the rest within Monte-Carlo noise.
+
+\begin{table}[!t]
+  \centering
+  \caption{Per-dataset CRPSS (higher is better) and dataset size.}\label{tab:per-dataset}
+  \footnotesize
+  \begin{tabular}{lrrrr}
+    \toprule
+    Dataset & $n_{\text{train}}$ & Published & Score$^+$ & FM \\
+    \midrule
+    yacht & 277 & 0.944 & \textbf{0.967} & 0.964 \\
+    energy & 691 & 0.953 & 0.966 & \textbf{0.966} \\
+    concrete & 927 & 0.757 & 0.807 & \textbf{0.809} \\
+    diabetes & 400 & 0.120 & 0.126 & \textbf{0.129} \\
+    wine & 5847 & \textbf{0.338} & 0.312 & 0.312 \\
+    kin8nm & 5000 & 0.521 & 0.589 & \textbf{0.594} \\
+    power & 8611 & 0.824 & \textbf{0.839} & 0.839 \\
+    naval & 10741 & 0.938 & 0.951 & \textbf{0.953} \\
+    cali.\ housing & 8000 & 0.642 & \textbf{0.647} & 0.642 \\
+    protein & 5000 & 0.349 & \textbf{0.363} & 0.356 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Stochasticity Ablation}\label{sec:abl-sde}
+We sweep $\varepsilon \in \{0.25, 0.5, 1.0\}$ with schedule $\in \{\text{linear},\sqrt{t}\}$ on the VP path, matched on residualizer (the C config used in the headline). Across all six SDE settings, no configuration Pareto-dominates the $\varepsilon = 0$ corner (Treeffuser-FM): CRPSS, $|\text{cE}|$@90, and $|\text{cE}|$@95 all degrade monotonically as $\varepsilon$ grows, and sample time rises with the SDE solver overhead. The closest contender (linear schedule, $\varepsilon=0.25$) matches $|\text{cE}|$@95 at 0.015 but is strictly worse on CRPSS, $|\text{cE}|$@50, KS pass rate, and is 1.85$\times$ slower (5.68\,s vs.\ 3.07\,s). The stochastic-interpolant framework therefore remains useful as a theoretical lens (\S\ref{sec:fm}) but the empirical recommendation collapses to the deterministic ODE.
+
+\subsection{Path Ablation}\label{sec:abl-path}
+Across the same ten datasets we compare linear, trigonometric, and VP paths with the same residualizer and ODE sampler. VP is the strongest on CRPS and tail coverage; trig matches VP on calibration but is mildly worse on CRPS; linear lags both on $|\text{cE}|$@95 (mean 0.029 vs.\ 0.015). The advantage tracks variance preservation: VP and trig satisfy $\alpha^2 + \beta^2 = 1$, keeping $y_t$ at roughly unit scale across $t$, which stabilizes the tree regressor's feature space relative to the linear-path schedule.
+
+\section{Discussion}\label{sec:disc}
+Two findings deserve emphasis. First, the per-row attribution table separates score-side and FM contributions cleanly, so the FM result is not implicitly absorbing improvements that belong to the score track. Second, the deterministic ODE wins under matched residualizer on the benchmark suite, despite the theoretical appeal of marginal-preserving SDE samplers. This is consistent with the diagnostic finding that residualizer-C produces residuals whose remaining structure is already amenable to a deterministic flow, leaving stochasticity nothing to fix on aggregate metrics; per-IQR-bin diagnostics show a residual flatness advantage for SDE samplers that does not survive marginalization.
+
+\paragraph{Limitations.} Our comparisons isolate score and flow-matching variants of the same underlying gradient-boosted-tree architecture. We do not yet compare against probabilistic regressors outside this family---NGBoost~\citep{duan2020ngboost}, distributional random forests~\citep{cevid2022drf}, instance-based GBT uncertainty~\citep{brophy2022ibug}, and diffusion-based CARD~\citep{han2022card} are the natural next references and are reserved for an extended version. The high-capacity residualizer is fixed by a separate sweep rather than tuned per dataset, and our protein subsample of 5000 rows limits conclusions on the largest-data regime.
+
+\paragraph{Future work.} Beyond competitor baselines, three threads merit investigation: dataset-adaptive residualizer selection, the flow-matching equivalent of log-sigma $t$ sampling (e.g., $\text{logit}(t) \sim \Norm(\cdot)$), and the use of stochastic-interpolant samplers when calibrated \emph{conditional} (rather than marginal) coverage matters.
+
+\begin{contributions}
+This anonymous submission lists no individual contributions.
+\end{contributions}
+
+\bibliography{refs}
+
+\end{document}
