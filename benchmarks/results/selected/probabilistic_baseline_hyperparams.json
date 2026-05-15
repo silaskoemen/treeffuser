@@ -1,6 +1,7 @@
 {
   "protocol": {
     "configs": [
+      "benchmarks/configs/probabilistic_baseline_hyperparams/card.yaml",
       "benchmarks/configs/probabilistic_baseline_hyperparams/catboost_uncertainty.yaml",
       "benchmarks/configs/probabilistic_baseline_hyperparams/deep_ensemble.yaml",
       "benchmarks/configs/probabilistic_baseline_hyperparams/ibug.yaml",
@@ -11,6 +12,7 @@
     "metric_direction": "min",
     "min_completeness": 1.0,
     "results": [
+      "benchmarks/results/raw/probabilistic_baseline_hyperparams_card.jsonl",
       "benchmarks/results/raw/probabilistic_baseline_hyperparams_catboost_uncertainty.jsonl",
       "benchmarks/results/raw/probabilistic_baseline_hyperparams_deep_ensemble.jsonl",
       "benchmarks/results/raw/probabilistic_baseline_hyperparams_ibug.jsonl",
@@ -75,6 +77,176 @@
     "tie_tolerance": 0.0025
   },
   "rankings": {
+    "card": [
+      {
+        "config": "benchmarks/configs/probabilistic_baseline_hyperparams/card.yaml",
+        "dataset_count": 8,
+        "dataset_scores": {
+          "bimodal_mixture": 0.5294758990330567,
+          "california_housing": 0.6779836816213489,
+          "diabetes": 42.42141198498184,
+          "heteroscedastic_gaussian_linear": 0.38786666176536216,
+          "heteroscedastic_gaussian_nonlinear": 0.41933315154023887,
+          "kin8nm": 0.14535418971870612,
+          "student_t_heavy_tail": 0.3755687826566299,
+          "wine_quality_white": 0.5086588258945678
+        },
+        "dataset_tie_breaker_scores": {
+          "bimodal_mixture": 0.02833333333333332,
+          "california_housing": 0.03333333333333329,
+          "diabetes": 0.09999999999999998,
+          "heteroscedastic_gaussian_linear": 0.04300000000000004,
+          "heteroscedastic_gaussian_nonlinear": 0.04633333333333334,
+          "kin8nm": 0.06777777777777776,
+          "student_t_heavy_tail": 0.023333333333333317,
+          "wine_quality_white": 0.054444444444444406
+        },
+        "mean_fit_time": 0.22501389226332927,
+        "model": "card",
+        "params": {
+          "batch_size": 256,
+          "diffusion_epochs": 150,
+          "dropout": 0.01,
+          "hidden_size": 100,
+          "learning_rate": 0.001,
+          "max_epochs": 150,
+          "n_layers": 1,
+          "n_steps": 50,
+          "patience": 15,
+          "sample_batch_size": 4096
+        },
+        "row_count": 24,
+        "score": 5.683206647151469,
+        "tie_breaker_score": 0.04956944444444443,
+        "variant": "card__h100__lr0p001__ep150__layers1__steps50"
+      },
+      {
+        "config": "benchmarks/configs/probabilistic_baseline_hyperparams/card.yaml",
+        "dataset_count": 8,
+        "dataset_scores": {
+          "bimodal_mixture": 0.5023662428507857,
+          "california_housing": 0.7201839532886021,
+          "diabetes": 43.88123428321131,
+          "heteroscedastic_gaussian_linear": 0.3530321966572597,
+          "heteroscedastic_gaussian_nonlinear": 0.3479541354172804,
+          "kin8nm": 0.14662536172773988,
+          "student_t_heavy_tail": 0.32258766660558413,
+          "wine_quality_white": 0.5101361305989954
+        },
+        "dataset_tie_breaker_scores": {
+          "bimodal_mixture": 0.04833333333333334,
+          "california_housing": 0.07999999999999996,
+          "diabetes": 0.09999999999999998,
+          "heteroscedastic_gaussian_linear": 0.06166666666666668,
+          "heteroscedastic_gaussian_nonlinear": 0.049333333333333375,
+          "kin8nm": 0.07666666666666666,
+          "student_t_heavy_tail": 0.005333333333333338,
+          "wine_quality_white": 0.07666666666666662
+        },
+        "mean_fit_time": 0.22890426559994617,
+        "model": "card",
+        "params": {
+          "batch_size": 256,
+          "diffusion_epochs": 150,
+          "dropout": 0.01,
+          "hidden_size": 100,
+          "learning_rate": 0.001,
+          "max_epochs": 150,
+          "n_layers": 1,
+          "n_steps": 100,
+          "patience": 15,
+          "sample_batch_size": 4096
+        },
+        "row_count": 24,
+        "score": 5.848014996294695,
+        "tie_breaker_score": 0.06224999999999999,
+        "variant": "card__h100__lr0p001__ep150__layers1__steps100"
+      },
+      {
+        "config": "benchmarks/configs/probabilistic_baseline_hyperparams/card.yaml",
+        "dataset_count": 8,
+        "dataset_scores": {
+          "bimodal_mixture": 0.5420662313443442,
+          "california_housing": 0.6828697399155663,
+          "diabetes": 43.91935825102184,
+          "heteroscedastic_gaussian_linear": 0.3924959768097091,
+          "heteroscedastic_gaussian_nonlinear": 0.45443877296220925,
+          "kin8nm": 0.15300736951399,
+          "student_t_heavy_tail": 0.3738413719854826,
+          "wine_quality_white": 0.49768491119957964
+        },
+        "dataset_tie_breaker_scores": {
+          "bimodal_mixture": 0.018333333333333313,
+          "california_housing": 0.05111111111111107,
+          "diabetes": 0.0953051643192488,
+          "heteroscedastic_gaussian_linear": 0.021666666666666685,
+          "heteroscedastic_gaussian_nonlinear": 0.037,
+          "kin8nm": 0.08666666666666663,
+          "student_t_heavy_tail": 0.024666666666666687,
+          "wine_quality_white": 0.055555555555555546
+        },
+        "mean_fit_time": 0.2612456283629096,
+        "model": "card",
+        "params": {
+          "batch_size": 256,
+          "diffusion_epochs": 150,
+          "dropout": 0.01,
+          "hidden_size": 50,
+          "learning_rate": 0.001,
+          "max_epochs": 150,
+          "n_layers": 1,
+          "n_steps": 50,
+          "patience": 15,
+          "sample_batch_size": 4096
+        },
+        "row_count": 24,
+        "score": 5.876970328094091,
+        "tie_breaker_score": 0.04878814553990609,
+        "variant": "card__h50__lr0p001__ep150__layers1__steps50"
+      },
+      {
+        "config": "benchmarks/configs/probabilistic_baseline_hyperparams/card.yaml",
+        "dataset_count": 8,
+        "dataset_scores": {
+          "bimodal_mixture": 0.4910314582262342,
+          "california_housing": 0.7494339349688449,
+          "diabetes": 48.648752729614245,
+          "heteroscedastic_gaussian_linear": 0.34139112128742144,
+          "heteroscedastic_gaussian_nonlinear": 0.3605324454342734,
+          "kin8nm": 0.17118643292444194,
+          "student_t_heavy_tail": 0.32883445231619607,
+          "wine_quality_white": 0.5335032433749437
+        },
+        "dataset_tie_breaker_scores": {
+          "bimodal_mixture": 0.01666666666666668,
+          "california_housing": 0.09333333333333331,
+          "diabetes": 0.09999999999999998,
+          "heteroscedastic_gaussian_linear": 0.038000000000000034,
+          "heteroscedastic_gaussian_nonlinear": 0.055333333333333345,
+          "kin8nm": 0.09999999999999998,
+          "student_t_heavy_tail": 0.014333333333333345,
+          "wine_quality_white": 0.08333333333333333
+        },
+        "mean_fit_time": 0.23706816146538282,
+        "model": "card",
+        "params": {
+          "batch_size": 256,
+          "diffusion_epochs": 150,
+          "dropout": 0.01,
+          "hidden_size": 50,
+          "learning_rate": 0.001,
+          "max_epochs": 150,
+          "n_layers": 1,
+          "n_steps": 100,
+          "patience": 15,
+          "sample_batch_size": 4096
+        },
+        "row_count": 24,
+        "score": 6.453083227268325,
+        "tie_breaker_score": 0.062625,
+        "variant": "card__h50__lr0p001__ep150__layers1__steps100"
+      }
+    ],
     "catboost_uncertainty": [
       {
         "config": "benchmarks/configs/probabilistic_baseline_hyperparams/catboost_uncertainty.yaml",
@@ -1542,6 +1714,27 @@
     ]
   },
   "winners": {
+    "card": {
+      "dataset_count": 8,
+      "model": "card",
+      "params": {
+        "batch_size": 256,
+        "diffusion_epochs": 150,
+        "dropout": 0.01,
+        "hidden_size": 100,
+        "learning_rate": 0.001,
+        "max_epochs": 150,
+        "n_layers": 1,
+        "n_steps": 50,
+        "patience": 15,
+        "sample_batch_size": 4096
+      },
+      "row_count": 24,
+      "score": 5.683206647151469,
+      "selected_from_config": "benchmarks/configs/probabilistic_baseline_hyperparams/card.yaml",
+      "tie_breaker_score": 0.04956944444444443,
+      "variant": "card__h100__lr0p001__ep150__layers1__steps50"
+    },
     "catboost_uncertainty": {
       "dataset_count": 8,
       "model": "catboost_uncertainty",

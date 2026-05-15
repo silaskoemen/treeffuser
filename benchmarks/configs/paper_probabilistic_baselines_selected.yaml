@@ -45,6 +45,19 @@ datasets:
     n_train: 41157
     n_test: 4573
 variants:
+  - name: card_selected
+    model: card
+    params:
+      max_epochs: 150
+      diffusion_epochs: 150
+      learning_rate: 0.001
+      batch_size: 256
+      patience: 15
+      dropout: 0.01
+      sample_batch_size: 4096
+      hidden_size: 100
+      n_layers: 1
+      n_steps: 50
   - name: catboost_uncertainty_selected
     model: catboost_uncertainty
     params:
@@ -94,6 +107,7 @@ samplers:
     method: euler
     pf_ode: false
     variants:
+      - card_selected
       - catboost_uncertainty_selected
       - deep_ensemble_selected
       - ibug_selected

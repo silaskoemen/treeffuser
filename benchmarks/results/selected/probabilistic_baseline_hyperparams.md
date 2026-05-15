@@ -9,6 +9,7 @@ Tie-breaker within 0.25%: `interval_90_abs_coverage_error`.
 
 | Family | Variant | Score | Tie-breaker | Rows |
 |---|---|---:|---:|---:|
+| card | `card__h100__lr0p001__ep150__layers1__steps50` | 5.68321 | 0.0495694 | 24 |
 | catboost_uncertainty | `catboost_uncertainty__d4__it3000__lr0p05` | 4.21683 | 0.0555319 | 24 |
 | deep_ensemble | `deep_ensemble__h50__lr0p001__ep150__ens5__layers1` | 4.13666 | 0.0335145 | 24 |
 | ibug | `ibug__k100__leaf_sample_trees64__lr0p05__md3__est300` | 4.34275 | 0.0200518 | 24 |
@@ -16,6 +17,15 @@ Tie-breaker within 0.25%: `interval_90_abs_coverage_error`.
 | qreg_lightgbm | `qreg_lightgbm__lr0p1__est500__leaves31__q31` | 4.27273 | 0.0746027 | 24 |
 
 ## Full Ranking
+
+### card
+
+| Rank | Variant | Score | Tie-breaker | Fit time | Rows |
+|---:|---|---:|---:|---:|---:|
+| 1 | `card__h100__lr0p001__ep150__layers1__steps50` | 5.68321 | 0.0495694 | 0.225 | 24 |
+| 2 | `card__h100__lr0p001__ep150__layers1__steps100` | 5.84801 | 0.06225 | 0.229 | 24 |
+| 3 | `card__h50__lr0p001__ep150__layers1__steps50` | 5.87697 | 0.0487881 | 0.261 | 24 |
+| 4 | `card__h50__lr0p001__ep150__layers1__steps100` | 6.45308 | 0.062625 | 0.237 | 24 |
 
 ### catboost_uncertainty
 

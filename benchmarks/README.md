@@ -69,6 +69,12 @@ Generate one fixed-grid selection config per model family:
 pixi run python -m benchmarks.select_probabilistic_baseline_hyperparams write-configs
 ```
 
+To add only CARD incrementally, generate just that family:
+
+```bash
+pixi run python -m benchmarks.select_probabilistic_baseline_hyperparams write-configs --families card
+```
+
 Run the generated family configs independently, for example:
 
 ```bash

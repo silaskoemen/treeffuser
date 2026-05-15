@@ -1,0 +1,108 @@
+# Hyperparameter-selection sweep for card.
+# This is not the final paper performance run.
+# Run this config independently, then pass the resulting JSONL file to
+# benchmarks/select_probabilistic_baseline_hyperparams.py select.
+# The selection suite mirrors Treeffuser's development protocol: 4 synthetic
+# diagnostics + 4 small real datasets, with fixed grids and paired seeds.
+
+seeds:
+  - 0
+  - 1
+  - 2
+seed_policy:
+  data_seed_offset: 0
+  model_seed_offset: 10000
+  sampler_seed_offset: 20000
+datasets:
+  - name: heteroscedastic_gaussian_linear
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: heteroscedastic_gaussian_nonlinear
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: student_t_heavy_tail
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: bimodal_mixture
+    n_train: 1000
+    n_test: 1000
+    x_dim: 3
+  - name: diabetes
+    n_train: 300
+    n_test: 142
+  - name: california_housing
+    n_train: 500
+    n_test: 300
+  - name: kin8nm
+    n_train: 500
+    n_test: 300
+  - name: wine_quality_white
+    n_train: 500
+    n_test: 300
+variants:
+  - name: card__h50__lr0p001__ep150__layers1__steps50
+    model: card
+    params:
+      max_epochs: 150
+      diffusion_epochs: 150
+      learning_rate: 0.001
+      batch_size: 256
+      patience: 15
+      dropout: 0.01
+      sample_batch_size: 4096
+      hidden_size: 50
+      n_layers: 1
+      n_steps: 50
+  - name: card__h50__lr0p001__ep150__layers1__steps100
+    model: card
+    params:
+      max_epochs: 150
+      diffusion_epochs: 150
+      learning_rate: 0.001
+      batch_size: 256
+      patience: 15
+      dropout: 0.01
+      sample_batch_size: 4096
+      hidden_size: 50
+      n_layers: 1
+      n_steps: 100
+  - name: card__h100__lr0p001__ep150__layers1__steps50
+    model: card
+    params:
+      max_epochs: 150
+      diffusion_epochs: 150
+      learning_rate: 0.001
+      batch_size: 256
+      patience: 15
+      dropout: 0.01
+      sample_batch_size: 4096
+      hidden_size: 100
+      n_layers: 1
+      n_steps: 50
+  - name: card__h100__lr0p001__ep150__layers1__steps100
+    model: card
+    params:
+      max_epochs: 150
+      diffusion_epochs: 150
+      learning_rate: 0.001
+      batch_size: 256
+      patience: 15
+      dropout: 0.01
+      sample_batch_size: 4096
+      hidden_size: 100
+      n_layers: 1
+      n_steps: 100
+samplers:
+  - n_samples: 200
+    n_steps: 1
+    n_parallel: 200
+    method: euler
+    pf_ode: false
+    variants:
+      - card__h50__lr0p001__ep150__layers1__steps50
+      - card__h50__lr0p001__ep150__layers1__steps100
+      - card__h100__lr0p001__ep150__layers1__steps50
+      - card__h100__lr0p001__ep150__layers1__steps100

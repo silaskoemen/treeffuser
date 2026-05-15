@@ -147,7 +147,7 @@ class IBUGXGBoostBaseline(SampleBaseline):
         ).fit(X_train, y_train)
         self.gbrt_model = gbrt_model
         try:
-            from ibug import IBUGWrapper
+            from ibug import IBUGWrapper  # noqa: PLC0415
         except ImportError:
             self.model = None
             self._train_leaves = gbrt_model.apply(X_train)
@@ -295,10 +295,7 @@ class LightGBMQuantileBaseline(SampleBaseline):
 class DeepEnsembleBaseline(ScaledRegressorMixin, SampleBaseline):
     """Lean PyTorch deep ensemble baseline.
 
-    We use this rather than CARD for the main paper baseline because the old
-    testbed runner documents a CARD/Treeffuser segfault interaction, and CARD's
-    two-stage diffusion training is much heavier. Deep ensembles are a standard,
-    stable neural UQ comparator with tractable CPU runs.
+    Deep ensembles are a standard, stable neural UQ comparator with tractable CPU runs.
     """
 
     def __init__(
@@ -400,6 +397,222 @@ class DeepEnsembleBaseline(ScaledRegressorMixin, SampleBaseline):
         return self._inverse_y(stacked[draw_idx])
 
 
+class CARDRegressionBaseline(ScaledRegressorMixin, SampleBaseline):
+    """Compact PyTorch implementation of CARD-style probabilistic regression.
+
+    CARD trains a deterministic conditional mean model and then a conditional
+    diffusion model for y. This adapter keeps that two-stage structure while
+    avoiding the old testbed's Lightning dependency stack.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int = 100,
+        n_layers: int = 2,
+        max_epochs: int = 150,
+        diffusion_epochs: int | None = None,
+        learning_rate: float = 1e-3,
+        batch_size: int = 256,
+        patience: int = 15,
+        n_steps: int = 100,
+        beta_start: float = 1e-4,
+        beta_end: float = 0.02,
+        dropout: float = 0.01,
+        sample_batch_size: int = 4096,
+        seed: int | None = None,
+    ) -> None:
+        self.hidden_size = hidden_size
+        self.n_layers = n_layers
+        self.max_epochs = max_epochs
+        self.diffusion_epochs = diffusion_epochs or max_epochs
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.patience = patience
+        self.n_steps = n_steps
+        self.beta_start = beta_start
+        self.beta_end = beta_end
+        self.dropout = dropout
+        self.sample_batch_size = sample_batch_size
+        self.seed = seed
+        self.cond_model = None
+        self.diff_model = None
+        self._betas = None
+        self._alphas = None
+        self._alpha_bars = None
+
+    def fit(self, X: ndarray, y: ndarray) -> CARDRegressionBaseline:
+        torch = _require("torch", "Install the bench extras with pixi before running.")
+        if self.seed is not None:
+            np.random.seed(self.seed)
+            torch.manual_seed(self.seed)
+
+        y = _ensure_2d_y(y)
+        X_scaled, y_scaled = self._fit_scalers(X, y)
+        X_scaled = X_scaled.astype(np.float32)
+        y_scaled = y_scaled.astype(np.float32)
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_scaled,
+            y_scaled,
+            test_size=0.1,
+            random_state=self.seed,
+        )
+        X_train_t = torch.as_tensor(X_train, dtype=torch.float32)
+        y_train_t = torch.as_tensor(y_train, dtype=torch.float32)
+        X_val_t = torch.as_tensor(X_val, dtype=torch.float32)
+        y_val_t = torch.as_tensor(y_val, dtype=torch.float32)
+
+        self.cond_model = _TorchPlainMLP(
+            in_dim=X_scaled.shape[1],
+            out_dim=y_scaled.shape[1],
+            hidden_size=self.hidden_size,
+            n_layers=self.n_layers,
+            dropout=self.dropout,
+        )
+        self._fit_conditional_model(torch, X_train_t, y_train_t, X_val_t, y_val_t)
+
+        self._betas, self._alphas, self._alpha_bars = _card_diffusion_schedule(
+            torch=torch,
+            n_steps=self.n_steps,
+            beta_start=self.beta_start,
+            beta_end=self.beta_end,
+        )
+        with torch.no_grad():
+            y_hat_train = self.cond_model(X_train_t).detach()
+            y_hat_val = self.cond_model(X_val_t).detach()
+        self.diff_model = _TorchCARDDenoiser(
+            x_dim=X_scaled.shape[1],
+            y_dim=y_scaled.shape[1],
+            hidden_size=self.hidden_size,
+            n_layers=self.n_layers,
+            dropout=self.dropout,
+        )
+        self._fit_diffusion_model(torch, X_train_t, y_train_t, y_hat_train, X_val_t, y_val_t, y_hat_val)
+        return self
+
+    def sample(self, X: ndarray, n_samples: int = 200, seed: int | None = None, **kwargs) -> ndarray:
+        del kwargs
+        torch = _require("torch", "Install the bench extras with pixi before running.")
+        if self.cond_model is None or self.diff_model is None:
+            raise ValueError("CARDRegressionBaseline must be fit before sampling.")
+
+        X_t = torch.as_tensor(self._transform_x(X).astype(np.float32), dtype=torch.float32)
+        repeated_X = X_t.repeat((n_samples, 1))
+        generator = torch.Generator().manual_seed(seed or 0)
+        sample_chunks = []
+        self.cond_model.eval()
+        self.diff_model.eval()
+        with torch.no_grad():
+            for start in range(0, repeated_X.shape[0], self.sample_batch_size):
+                x_batch = repeated_X[start : start + self.sample_batch_size]
+                y_batch = torch.randn(
+                    (x_batch.shape[0], self._y_scaler.n_features_in_),
+                    generator=generator,
+                    dtype=torch.float32,
+                )
+                y_hat = self.cond_model(x_batch)
+                for step in range(self.n_steps - 1, -1, -1):
+                    t = torch.full((x_batch.shape[0], 1), step / max(self.n_steps - 1, 1))
+                    eps = self.diff_model(x_batch, y_batch, y_hat, t)
+                    beta = self._betas[step]
+                    alpha = self._alphas[step]
+                    alpha_bar = self._alpha_bars[step]
+                    mean = (y_batch - beta * eps / torch.sqrt(1.0 - alpha_bar)) / torch.sqrt(alpha)
+                    if step > 0:
+                        alpha_bar_prev = self._alpha_bars[step - 1]
+                        variance = beta * (1.0 - alpha_bar_prev) / (1.0 - alpha_bar)
+                        noise = torch.randn(y_batch.shape, generator=generator, dtype=torch.float32)
+                        y_batch = mean + torch.sqrt(variance) * noise
+                    else:
+                        y_batch = mean
+                sample_chunks.append(y_batch.numpy())
+        samples = np.concatenate(sample_chunks, axis=0).reshape(n_samples, X.shape[0], -1)
+        return self._inverse_y(samples)
+
+    def _fit_conditional_model(self, torch, X_train, y_train, X_val, y_val) -> None:
+        optimizer = torch.optim.Adam(self.cond_model.parameters(), lr=self.learning_rate)
+        dataset = torch.utils.data.TensorDataset(X_train, y_train)
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            generator=torch.Generator().manual_seed(self.seed or 0),
+        )
+        self._fit_torch_model(
+            torch=torch,
+            model=self.cond_model,
+            optimizer=optimizer,
+            loader=loader,
+            max_epochs=self.max_epochs,
+            validation_loss=lambda: torch.nn.functional.mse_loss(self.cond_model(X_val), y_val),
+            batch_loss=lambda xb, yb: torch.nn.functional.mse_loss(self.cond_model(xb), yb),
+        )
+
+    def _fit_diffusion_model(self, torch, X_train, y_train, y_hat_train, X_val, y_val, y_hat_val) -> None:
+        optimizer = torch.optim.Adam(self.diff_model.parameters(), lr=self.learning_rate)
+        dataset = torch.utils.data.TensorDataset(X_train, y_train, y_hat_train)
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            generator=torch.Generator().manual_seed((self.seed or 0) + 1),
+        )
+        train_generator = torch.Generator().manual_seed((self.seed or 0) + 2)
+        val_generator = torch.Generator().manual_seed((self.seed or 0) + 3)
+        self._fit_torch_model(
+            torch=torch,
+            model=self.diff_model,
+            optimizer=optimizer,
+            loader=loader,
+            max_epochs=self.diffusion_epochs,
+            validation_loss=lambda: self._diffusion_loss(torch, X_val, y_val, y_hat_val, val_generator),
+            batch_loss=lambda xb, yb, yhat: self._diffusion_loss(torch, xb, yb, yhat, train_generator),
+        )
+
+    def _fit_torch_model(
+        self,
+        torch,
+        model,
+        optimizer,
+        loader,
+        max_epochs: int,
+        validation_loss,
+        batch_loss,
+    ) -> None:
+        best_state = None
+        best_loss = math.inf
+        stale_epochs = 0
+        for _ in range(max_epochs):
+            model.train()
+            for batch in loader:
+                optimizer.zero_grad()
+                loss = batch_loss(*batch)
+                loss.backward()
+                optimizer.step()
+            model.eval()
+            with torch.no_grad():
+                val_loss = validation_loss().item()
+            if val_loss < best_loss:
+                best_loss = val_loss
+                best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+                stale_epochs = 0
+            else:
+                stale_epochs += 1
+                if stale_epochs >= self.patience:
+                    break
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        model.eval()
+
+    def _diffusion_loss(self, torch, X, y, y_hat, generator) -> Any:
+        t_idx = torch.randint(self.n_steps, (X.shape[0],), generator=generator)
+        alpha_bar = self._alpha_bars[t_idx].reshape(-1, 1)
+        eps = torch.randn(y.shape, generator=generator, dtype=torch.float32)
+        y_t = torch.sqrt(alpha_bar) * y + torch.sqrt(1.0 - alpha_bar) * eps
+        t = t_idx.reshape(-1, 1).float() / max(self.n_steps - 1, 1)
+        eps_pred = self.diff_model(X, y_t, y_hat, t)
+        return torch.nn.functional.mse_loss(eps_pred, eps)
+
+
 class _TorchMeanVarianceMLP:
     def __new__(cls, x_dim: int, y_dim: int, hidden_size: int, n_layers: int):
         torch = _require("torch", "Install the bench extras with pixi before running.")
@@ -422,6 +635,72 @@ class _TorchMeanVarianceMLP:
                 return mean, torch.nn.functional.softplus(raw_var) + 1e-6
 
         return Model()
+
+
+class _TorchPlainMLP:
+    def __new__(
+        cls,
+        in_dim: int,
+        out_dim: int,
+        hidden_size: int,
+        n_layers: int,
+        dropout: float,
+    ):
+        torch = _require("torch", "Install the bench extras with pixi before running.")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                layers = []
+                current_dim = in_dim
+                for _ in range(n_layers):
+                    layers.append(torch.nn.Linear(current_dim, hidden_size))
+                    layers.append(torch.nn.ReLU())
+                    if dropout > 0.0:
+                        layers.append(torch.nn.Dropout(dropout))
+                    current_dim = hidden_size
+                layers.append(torch.nn.Linear(current_dim, out_dim))
+                self.net = torch.nn.Sequential(*layers)
+
+            def forward(self, x):
+                return self.net(x)
+
+        return Model()
+
+
+class _TorchCARDDenoiser:
+    def __new__(
+        cls,
+        x_dim: int,
+        y_dim: int,
+        hidden_size: int,
+        n_layers: int,
+        dropout: float,
+    ):
+        torch = _require("torch", "Install the bench extras with pixi before running.")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.net = _TorchPlainMLP(
+                    in_dim=x_dim + 2 * y_dim + 1,
+                    out_dim=y_dim,
+                    hidden_size=hidden_size,
+                    n_layers=n_layers,
+                    dropout=dropout,
+                )
+
+            def forward(self, x, y_t, y_hat, t):
+                return self.net(torch.cat([x, y_t, y_hat, t], dim=1))
+
+        return Model()
+
+
+def _card_diffusion_schedule(torch, n_steps: int, beta_start: float, beta_end: float):
+    betas = torch.linspace(beta_start, beta_end, n_steps, dtype=torch.float32)
+    alphas = 1.0 - betas
+    alpha_bars = torch.cumprod(alphas, dim=0)
+    return betas, alphas, alpha_bars
 
 
 class CatBoostUncertaintyBaseline(SampleBaseline):
@@ -487,6 +766,7 @@ BASELINE_BUILDERS = {
     "drf": DistributionalRandomForestBaseline,
     "qreg_lightgbm": LightGBMQuantileBaseline,
     "deep_ensemble": DeepEnsembleBaseline,
+    "card": CARDRegressionBaseline,
     "catboost_uncertainty": CatBoostUncertaintyBaseline,
 }
 

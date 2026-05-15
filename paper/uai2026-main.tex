@@ -33,7 +33,7 @@
 \maketitle
 
 \begin{abstract}
-We extend Treeffuser, a score-based diffusion model for probabilistic tabular regression with gradient-boosted trees, in two complementary directions. First, on the score-training side, we add conditional-mean residualization with a high-capacity inner model, EDM-style preconditioning, log-sigma time sampling, and noise-level features; together these reduce 95\% coverage error from 0.029 to 0.026 and cut sampling time 3.1$\times$ over the published baseline. Second, we replace score matching with flow matching using Gaussian probability paths, derive a closed-form mapping from learned velocity to implied score, and benchmark a stochastic-interpolant sampler family. With a VP path and deterministic Heun ODE at five steps, the flow-matching variant ties our improved score model on CRPS skill score, reduces 95\% coverage error by 35\%, and is a further 3.3$\times$ faster. The common mechanism is better conditioning of the supervised regression problem seen by the tree ensemble. Against five tuned probabilistic baselines (NGBoost, quantile-regression LightGBM, CatBoost uncertainty, iBUG, and a deep ensemble), the Treeffuser variants lead within this benchmarked set on normalized CRPS and tail coverage. Stochastic ($\varepsilon > 0$) samplers do not Pareto-dominate the deterministic corner, so the empirical recommendation is the $\varepsilon = 0$ specialization.
+We extend Treeffuser, a score-based diffusion model for probabilistic tabular regression with gradient-boosted trees, in two complementary directions. First, on the score-training side, we add conditional-mean residualization with a high-capacity inner model, EDM-style preconditioning, log-sigma time sampling, and noise-level features; together these reduce 95\% coverage error from 0.029 to 0.026 and cut sampling time 3.1$\times$ over the published baseline. Second, we replace score matching with flow matching using Gaussian probability paths, derive a closed-form mapping from learned velocity to implied score, and benchmark a stochastic-interpolant sampler family. With a VP path and deterministic Heun ODE at five steps, the flow-matching variant ties our improved score model on CRPS skill score, reduces 95\% coverage error by 35\%, and is a further 3.3$\times$ faster. The common mechanism is better conditioning of the supervised regression problem seen by the tree ensemble. Against six tuned probabilistic baselines (NGBoost, quantile-regression LightGBM, CatBoost uncertainty, iBUG, a deep ensemble, and CARD-style neural diffusion), the Treeffuser variants lead within this benchmarked set on normalized CRPS and tail coverage. Stochastic ($\varepsilon > 0$) samplers do not Pareto-dominate the deterministic corner, so the empirical recommendation is the $\varepsilon = 0$ specialization.
 \end{abstract}
 
 \section{Introduction}\label{sec:intro}
@@ -86,7 +86,7 @@ The flow-matching code reuses Treeffuser's per-output-dimension LightGBM fitter 
 
 \paragraph{Metrics.} We report CRPS skill score $\crpss = 1 - \crps_{\text{model}} / \crps_{\text{climatology}}$, where climatology is the empirical CDF of $y_{\text{train}}$; mean rel-CRPS (per-dataset CRPS divided by the best variant on that dataset, then averaged); the Dawid--Sebastiani score~\citep{dawid1984pit}; the fraction of (dataset, seed) pairs at which a Kolmogorov--Smirnov test on the probability integral transform fails to reject uniformity at $\alpha=0.05$ ("PIT KS $p{>}.05$"); absolute coverage error at the 50/90/95\% nominal interval levels~\citep{gneiting2007crps}; and mean per-batch sample time.
 
-\paragraph{Variants compared.} Three Treeffuser rows attribute contributions cleanly: (1)~\textsc{published}---the original baseline with noise-prediction, uniform $t$, no residualization; (2)~\textsc{score+}---the baseline plus \S\ref{sec:score-side}; (3)~\textsc{FM}---VP flow matching with residualizer-C and a 5-step Heun ODE. All share the same LightGBM size. We also compare against five tuned probabilistic baselines: NGBoost~\citep{duan2020ngboost}, quantile-regression LightGBM~\citep{ke2017lightgbm}, CatBoost RMSE-with-uncertainty~\citep{prokhorenkova2018catboost}, iBUG~\citep{brophy2022ibug}, and a Gaussian deep ensemble~\citep{lakshminarayanan2017deep}.
+\paragraph{Variants compared.} Three Treeffuser rows attribute contributions cleanly: (1)~\textsc{published}---the original baseline with noise-prediction, uniform $t$, no residualization; (2)~\textsc{score+}---the baseline plus \S\ref{sec:score-side}; (3)~\textsc{FM}---VP flow matching with residualizer-C and a 5-step Heun ODE. All share the same LightGBM size. We also compare against six tuned probabilistic baselines: NGBoost~\citep{duan2020ngboost}, quantile-regression LightGBM~\citep{ke2017lightgbm}, CatBoost RMSE-with-uncertainty~\citep{prokhorenkova2018catboost}, iBUG~\citep{brophy2022ibug}, a Gaussian deep ensemble~\citep{lakshminarayanan2017deep}, and CARD-style neural diffusion~\citep{han2022card}.
 
 \begin{table*}[!t]
   \centering
@@ -105,12 +105,13 @@ The flow-matching code reuses Treeffuser's per-output-dimension LightGBM fitter 
     NGBoost & 0.591 & 1.420 & 0.343 & 0.43 & 0.093 & 0.070 & 0.064 & 0.09\,s \\
     Deep ensemble & 0.529 & 3.678 & 0.907 & 0.57 & \textbf{0.051} & 0.040 & 0.026 & 0.01\,s \\
     iBUG & 0.487 & 3.870 & 1.272 & 0.43 & 0.098 & 0.035 & 0.021 & 1.51\,s \\
+    CARD-style diffusion & 0.379 & 6.651 & 1.675 & 0.40 & 0.078 & 0.031 & 0.022 & 0.83\,s \\
     \bottomrule
   \end{tabular}
 \end{table*}
 
 \subsection{Headline Result}\label{sec:headline}
-Table~\ref{tab:headline} reports cross-dataset means. The score-side modifications lift CRPSS from 0.652 to 0.669, raise PIT-uniformity pass rate from 0.20 to 0.60, and cut sample time 3.1$\times$. Flow matching matches this CRPSS, improves 90/95\% coverage error by 35\% each, and is another 3.3$\times$ faster, for a 10.2$\times$ speedup over the published baseline. Against external baselines, the closest challenger is quantile-regression LightGBM (CRPSS 0.648, rel-CRPS 1.382), but it remains behind all Treeffuser rows on normalized CRPS and has $3\times$ the 95\% coverage error of FM. Deep ensembles and iBUG are competitive on tail coverage but much worse on rel-CRPS.
+Table~\ref{tab:headline} reports cross-dataset means. The score-side modifications lift CRPSS from 0.652 to 0.669, raise PIT-uniformity pass rate from 0.20 to 0.60, and cut sample time 3.1$\times$. Flow matching matches this CRPSS, improves 90/95\% coverage error by 35\% each, and is another 3.3$\times$ faster, for a 10.2$\times$ speedup over the published baseline. Against external baselines, the closest challenger is quantile-regression LightGBM (CRPSS 0.648, rel-CRPS 1.382), but it remains behind all Treeffuser rows on normalized CRPS and has $3\times$ the 95\% coverage error of FM. Deep ensembles, iBUG, and CARD-style diffusion are competitive on tail coverage but much worse on rel-CRPS.
 
 \subsection{Per-Dataset CRPSS}\label{sec:perdata}
 Table~\ref{tab:per-dataset} shows the Treeffuser per-dataset CRPSS. The improved variants dominate the small-to-mid regime ($n_{\text{train}} \leq 11$k): both beat the published baseline on every such dataset except \texttt{wine}. On the two largest datasets the picture inverts: the published baseline reclaims \texttt{california\ housing} and the fast FM row trails on \texttt{protein}. The win count understates the asymmetry: published wins by tight margins on raw CRPS ($2$--$4\%$), whereas its losses on yacht, energy, concrete, kin8nm, and naval are far wider. This motivates dataset-adaptive residualizer selection rather than a single fixed recipe; Appendix~\ref{app:tail-diagnostic} also shows that stochastic samplers can improve high-uncertainty tail coverage on these datasets even when they lose on aggregate CRPS.
@@ -149,7 +150,7 @@ Three score-side tricks were ported to FM and rejected by matched sweeps. Log-no
 \section{Discussion}\label{sec:disc}
 Two findings deserve emphasis. First, the per-row attribution table separates score-side and FM contributions cleanly, so the FM result is not implicitly absorbing improvements that belong to the score track. Second, the deterministic ODE wins under matched residualizer on the benchmark suite, despite the theoretical appeal of marginal-preserving SDE samplers. The common mechanism behind the score$^+$ and FM gains is regression conditioning for tree ensembles: EDM preconditioning stabilises the VE score path's inputs and denoising residual, while VP-FM avoids much of the same conditioning problem through the path geometry itself. This is not a single target-scaling story; log-$\sigma$ sampling controls where tree capacity is spent, the log-$\sigma$ feature exposes the noise regime, and Heun ODE sampling is an inference-side efficiency gain. The large-dataset inversion argues against a blanket ``SDE is worse'' interpretation: per-IQR-bin diagnostics show that stochasticity can improve high-uncertainty tail coverage, while the aggregate metrics penalise the same runs for broader intervals, worse CRPS, and higher latency.
 
-\paragraph{Limitations.} External baselines use fixed family-level grids selected on a small validation suite, not per-dataset Bayesian optimization. We include NGBoost, iBUG, CatBoost uncertainty, quantile-regression LightGBM, and a deep ensemble, but not CARD~\citep{han2022card} or distributional random forests~\citep{cevid2022drf}. More importantly, the residualizer and score+/FM hyperparameters are fixed by sweeps run mostly on small-to-mid datasets and reused across the suite; the large-dataset inversions in Table~\ref{tab:per-dataset} identify per-dataset residualizer and time-sampling selection as the main remaining tuning axis.
+\paragraph{Limitations.} External baselines use fixed family-level grids selected on a small validation suite, not per-dataset Bayesian optimization. We include NGBoost, iBUG, CatBoost uncertainty, quantile-regression LightGBM, a deep ensemble, and a CARD-style neural diffusion baseline, but not distributional random forests~\citep{cevid2022drf}. More importantly, the residualizer and score+/FM hyperparameters are fixed by sweeps run mostly on small-to-mid datasets and reused across the suite; the large-dataset inversions in Table~\ref{tab:per-dataset} identify per-dataset residualizer and time-sampling selection as the main remaining tuning axis.
 
 \paragraph{Future work.} Two threads merit investigation: dataset-adaptive residualizer selection, and explicit selection criteria for stochastic-interpolant samplers when calibrated \emph{conditional} (rather than marginal) coverage matters.
 
@@ -401,7 +402,7 @@ VP edges trig on CRPS and tail coverage; both Pareto-dominate linear on $|\text{
 
 \section{Probabilistic-Family Baselines}\label{app:competitors}
 
-We compare the headline Treeffuser variants against five external probabilistic regressors (Table~\ref{tab:competitors}). Hyperparameters for each baseline were selected by a per-model grid summarised in this appendix's accompanying configs (\texttt{benchmarks/configs/probabilistic\_baseline\_hyperparams/}).
+We compare the headline Treeffuser variants against six external probabilistic regressors (Table~\ref{tab:competitors}). Hyperparameters for each baseline were selected by a per-model grid summarised in this appendix's accompanying configs (\texttt{benchmarks/configs/probabilistic\_baseline\_hyperparams/}). The CARD row uses a compact benchmark adapter with the same two-stage conditional-mean plus conditional-diffusion structure as CARD~\citep{han2022card}.
 
 \begin{table}[!h]
   \centering
@@ -420,11 +421,12 @@ We compare the headline Treeffuser variants against five external probabilistic 
     NGBoost (Gaussian)              & 0.591 & 1.446 & 4.257 & 0.046 & 0.064 & 0.09 \\
     Deep ensemble                   & 0.529 & 3.742 & 4.588 & 0.042 & 0.026 & 0.01 \\
     iBUG (XGBoost)                  & 0.487 & 3.963 & 4.699 & 0.061 & 0.021 & 1.51 \\
+    CARD-style diffusion            & 0.379 & 6.697 & 6.248 & 0.047 & 0.022 & 0.83 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The Treeffuser variants lead the comparison on CRPSS, rel-CRPS, and tail coverage. Quantile-regression LightGBM is the strongest external competitor on CRPSS and raw CRPS, but it is worse on rel-CRPS and has $3\times$ the 95\% coverage error of \textsc{FM-fast}. Deep ensembles and iBUG have reasonable tail coverage but poor normalized CRPS, indicating broad or miscentered predictive distributions rather than uniformly stronger uncertainty estimates.
+The Treeffuser variants lead the comparison on CRPSS, rel-CRPS, and tail coverage. Quantile-regression LightGBM is the strongest external competitor on CRPSS and raw CRPS, but it is worse on rel-CRPS and has $3\times$ the 95\% coverage error of \textsc{FM-fast}. Deep ensembles, iBUG, and CARD-style diffusion have reasonable tail coverage but poor normalized CRPS, indicating broad or miscentered predictive distributions rather than uniformly stronger uncertainty estimates.
 
 \section{Extended Per-Dataset Results}\label{app:perdata-ext}
 
@@ -458,37 +460,39 @@ FM is the fastest sampler on every dataset, with the lead widening on the larges
 
 \section{Conditional Tail Calibration Diagnostic}\label{app:tail-diagnostic}
 
-The large-dataset inversion in Table~\ref{tab:per-dataset} admits two plausible mechanisms: the fixed residualizer may be suboptimal at high $n$, and stochastic samplers may improve conditional tail calibration in high-uncertainty regions. The benchmark logs already include coverage stratified by predicted-IQR quintile, allowing a lightweight diagnostic without rerunning. Table~\ref{tab:tail-diagnostic} reports the absolute 95\% coverage error in the top predicted-IQR bin on \texttt{california\_housing} and \texttt{protein}.
+The large-dataset inversion in Table~\ref{tab:per-dataset} admits two plausible mechanisms: the fixed residualizer may be suboptimal at high $n$, and stochastic samplers may improve conditional tail calibration in high-uncertainty regions. Table~\ref{tab:tail-diagnostic} reports direct 95\% coverage on \texttt{california\_housing} and \texttt{protein}, including the highest predicted-IQR bin.
 
 \begin{table}[!h]
   \centering
-  \caption{High-uncertainty tail diagnostic on the two largest datasets. ``Top-IQR'' is $|\text{cE}|$@95 in the highest predicted-IQR quintile; IQR-MACE is mean $|\text{cE}|$@95 across predicted-IQR quintiles. Lower is better. Full rows use the full-data headline run; subset rows use the four-dataset residualizer-FM sweep.}\label{tab:tail-diagnostic}
+  \caption{High-uncertainty tail diagnostic on the two largest datasets. Cov@95 is marginal empirical coverage; Top-IQR Cov@95 is empirical coverage in the highest predicted-IQR quintile; both target 0.95. IQR-MACE is mean $|\text{cE}|$@95 across predicted-IQR quintiles, so lower is better. SDE-linear uses a linear stochasticity schedule; SDE-$\sqrt{t}$ uses the square-root schedule. All rows use the full training and test splits, averaged over the same three seeds as the headline run.}\label{tab:tail-diagnostic}
   \scriptsize
-  \begin{tabular}{lllrrrr}
+  \begin{tabular}{llrrrr}
     \toprule
-    Dataset & Run & Variant & CRPS & $|\text{cE}|$@95 & IQR-MACE & Top-IQR \\
+    Dataset & Variant & CRPS & Cov@95 & IQR-MACE & Top-IQR Cov@95 \\
     \midrule
-    cali.\ housing & full & Published SDE & \textbf{0.207} & 0.009 & \textbf{0.015} & \textbf{0.019} \\
-                  & full & FM ODE-C      & 0.214 & \textbf{0.003} & 0.021 & 0.050 \\
-                  & full & FM ODE-E      & 0.213 & \textbf{0.003} & 0.021 & 0.050 \\
-                  & subset & FM ODE-C    & \textbf{0.225} & \textbf{0.006} & 0.020 & 0.042 \\
-                  & subset & FM SDE-C    & 0.227 & 0.016 & 0.022 & 0.012 \\
-                  & subset & FM SDE-C $\sqrt{t}$ & 0.227 & 0.015 & \textbf{0.020} & \textbf{0.010} \\
-    protein       & full & Published SDE & 1.787 & 0.006 & 0.018 & 0.025 \\
-                  & full & FM ODE-C      & 1.860 & 0.017 & 0.025 & 0.027 \\
-                  & full & FM ODE-E      & \textbf{1.771} & \textbf{0.002} & \textbf{0.008} & \textbf{0.007} \\
-                  & subset & FM ODE-E    & \textbf{2.223} & \textbf{0.008} & 0.014 & 0.023 \\
-                  & subset & FM SDE-E    & 2.228 & 0.014 & 0.016 & 0.010 \\
-                  & subset & FM SDE-E $\sqrt{t}$ & 2.225 & 0.012 & \textbf{0.012} & \textbf{0.008} \\
+    cali.\ housing & Published SDE            & \textbf{0.207} & 0.958 & \textbf{0.015} & 0.931 \\
+                   & FM ODE-C                 & 0.214 & \textbf{0.947} & 0.021 & 0.900 \\
+                   & FM ODE-E                 & 0.213 & 0.947 & 0.021 & 0.900 \\
+                   & FM SDE-C linear          & 0.215 & 0.969 & 0.023 & 0.939 \\
+                   & FM SDE-C $\sqrt{t}$      & 0.215 & 0.967 & 0.022 & 0.938 \\
+                   & FM SDE-E linear          & 0.213 & 0.971 & 0.023 & \textbf{0.944} \\
+                   & FM SDE-E $\sqrt{t}$      & 0.213 & 0.969 & 0.023 & \textbf{0.944} \\
+    protein        & Published SDE            & 1.787 & 0.944 & 0.018 & 0.925 \\
+                   & FM ODE-C                 & 1.860 & 0.933 & 0.025 & 0.923 \\
+                   & FM ODE-E                 & \textbf{1.771} & \textbf{0.949} & \textbf{0.008} & 0.943 \\
+                   & FM SDE-C linear          & 1.859 & 0.959 & 0.011 & 0.960 \\
+                   & FM SDE-C $\sqrt{t}$      & 1.856 & 0.956 & 0.012 & \textbf{0.954} \\
+                   & FM SDE-E linear          & 1.779 & 0.974 & 0.024 & 0.973 \\
+                   & FM SDE-E $\sqrt{t}$      & 1.776 & 0.971 & 0.021 & 0.971 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The diagnostic supports a tradeoff rather than a one-sided conclusion. On \texttt{california\_housing}, the published SDE has much better high-IQR tail coverage than the full-data FM ODE rows, and the matched subset sweep shows that adding FM stochasticity closes the same top-IQR gap. On \texttt{protein}, however, the full-data FM ODE-E row already has the best CRPS and top-IQR coverage, while stochastic subset rows improve top-IQR coverage relative to ODE-E only by giving up aggregate CRPS and marginal 95\% coverage. Thus the safest interpretation is not that SDE samplers are dominated, but that their benefit is conditional and must be selected against conditional-calibration metrics rather than headline CRPS alone.
+The diagnostic supports a tradeoff rather than a one-sided conclusion. On \texttt{california\_housing}, the deterministic FM rows under-cover the high-IQR bin (0.900), while adding FM stochasticity lifts this coverage to 0.938--0.944; the price is marginal over-coverage (0.967--0.971) and no gain over the published SDE on CRPS or IQR-MACE. On \texttt{protein}, residualizer-E with the deterministic ODE is already close to the nominal target and remains best on CRPS and IQR-MACE, whereas the residualizer-E SDE rows over-cover both marginally and in the high-IQR bin. Residualizer-C stochasticity is directionally useful for coverage, especially with the square-root schedule, but gives up CRPS. Thus the safest interpretation is not that SDE samplers are dominated, but that their benefit is conditional and must be selected against conditional-calibration metrics rather than headline CRPS alone.
 
 \section{Reproducibility}\label{app:repro}
 
-All sweeps in this paper are driven by YAML configs under \texttt{benchmarks/configs/}. Each result file is a JSON Lines document recording the full hyperparameter set, the random seeds (data/model/sampler), the git commit hash of the model code, a hash of the Treeffuser source tree, and every reported metric on a per-(dataset, seed) row. The full-data runs reported in the main paper used commit \texttt{99e3665} of the model source (\texttt{git\_sha} field on every row of \texttt{paper\_real\_data\_v2\_full.jsonl} and \texttt{paper\_probabilistic\_baselines\_selected\_full.jsonl}); the configs that produced the appendix tables are listed alongside in Table~\ref{tab:appendix-provenance}.
+All sweeps in this paper are driven by YAML configs under \texttt{benchmarks/configs/}. Each result file is a JSON Lines document recording the full hyperparameter set, the random seeds (data/model/sampler), the git commit hash of the model code, a hash of the Treeffuser source tree, and every reported metric on a per-(dataset, seed) row. The full-data Treeffuser and original external-baseline runs used commit \texttt{99e3665} of the model source (\texttt{git\_sha} field on every row of \texttt{paper\_real\_data\_v2\_full.jsonl} and \texttt{paper\_probabilistic\_baselines\_selected\_full.jsonl}); the CARD add-on rows are recorded separately in \texttt{paper\_probabilistic\_baselines\_card\_selected\_full.jsonl}. The configs that produced the appendix tables are listed alongside in Table~\ref{tab:appendix-provenance}.
 
 \begin{table}[!h]
   \centering
@@ -507,9 +511,9 @@ All sweeps in this paper are driven by YAML configs under \texttt{benchmarks/con
     \ref{tab:minsnr}        & \texttt{fm\_loss\_weighting\_sweep.yaml} & \texttt{fm\_loss\_weighting\_sweep\_\_*.jsonl} \\
     \ref{tab:stoch-eps}     & \texttt{sde\_lower\_stoch\_sweep.yaml}, \texttt{stochasticity\_schedule\_sweep.yaml} & \texttt{sde\_lower\_stoch\_sweep\_\_*.jsonl}, \texttt{stochasticity\_schedule\_sweep\_\_*.jsonl} \\
     \ref{tab:path}          & \texttt{flow\_path\_sweep.yaml}          & \texttt{flow\_path\_sweep\_\_*.jsonl} \\
-    \ref{tab:competitors}   & \texttt{paper\_probabilistic\_baselines\_selected.yaml} & \texttt{paper\_probabilistic\_baselines\_selected\_full.jsonl} \\
+    \ref{tab:competitors}   & \texttt{paper\_probabilistic\_baselines\_selected.yaml} & \texttt{paper\_probabilistic\_baselines\_selected\_full.jsonl}, \texttt{paper\_probabilistic\_baselines\_card\_selected\_full.jsonl} \\
     \ref{tab:per-dataset}, \ref{tab:perdata-ext}, \ref{tab:headline} & \texttt{paper\_real\_data\_v2.yaml} & \texttt{paper\_real\_data\_v2\_full.jsonl} \\
-    \ref{tab:tail-diagnostic} & \texttt{paper\_real\_data\_v2.yaml}, \texttt{residualizer\_fm\_sweep.yaml} & \texttt{paper\_real\_data\_v2\_full.jsonl}, \texttt{residualizer\_fm\_sweep\_\_*.jsonl} \\
+    \ref{tab:tail-diagnostic} & \texttt{paper\_real\_data\_v2.yaml}, \texttt{tail\_calibration\_full.yaml} & \texttt{paper\_real\_data\_v2\_full.jsonl}, \texttt{tail\_calibration\_full.jsonl} \\
     \bottomrule
   \end{tabular}}
 \end{table}

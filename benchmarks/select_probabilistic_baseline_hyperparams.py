@@ -10,7 +10,6 @@ from typing import Any
 
 from benchmarks.run import load_config
 
-
 SEED_POLICY = {
     "data_seed_offset": 0,
     "model_seed_offset": 10000,
@@ -77,6 +76,23 @@ FAMILY_GRIDS = {
             "n_ensembles": [3, 5],
             "hidden_size": [50, 100],
             "n_layers": [1, 2],
+        },
+    },
+    "card": {
+        "model": "card",
+        "constant": {
+            "max_epochs": 150,
+            "diffusion_epochs": 150,
+            "learning_rate": 0.001,
+            "batch_size": 256,
+            "patience": 15,
+            "dropout": 0.01,
+            "sample_batch_size": 4096,
+        },
+        "grid": {
+            "hidden_size": [50, 100],
+            "n_layers": [1],
+            "n_steps": [50, 100],
         },
     },
     "catboost_uncertainty": {
@@ -561,7 +577,7 @@ def selection_config_header(family: str) -> list[str]:
 
 def write_yaml(path: Path, data: dict[str, Any], header: list[str]) -> None:
     try:
-        import yaml
+        import yaml  # noqa: PLC0415
     except ModuleNotFoundError:
         text = simple_yaml_dump(data)
     else:
@@ -611,7 +627,17 @@ def format_scalar(value: Any) -> str:
 def slugify_params(params: dict[str, Any]) -> str:
     parts = []
     for key, value in sorted(params.items()):
-        if key in {"early_stopping_rounds", "thread_count", "n_jobs", "min_child_samples", "batch_size", "patience"}:
+        if key in {
+            "batch_size",
+            "diffusion_epochs",
+            "dropout",
+            "early_stopping_rounds",
+            "min_child_samples",
+            "n_jobs",
+            "patience",
+            "sample_batch_size",
+            "thread_count",
+        }:
             continue
         parts.append(f"{short_key(key)}{slugify_value(value)}")
     return "__".join(parts)
@@ -629,6 +655,7 @@ def short_key(key: str) -> str:
         "n_ensembles": "ens",
         "n_estimators": "est",
         "n_layers": "layers",
+        "n_steps": "steps",
         "num_leaves": "leaves",
         "quantile_count": "q",
     }.get(key, key)

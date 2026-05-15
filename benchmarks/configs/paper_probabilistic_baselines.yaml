@@ -8,9 +8,9 @@
 # NGBoost, iBUG, distributional random forests, LightGBM quantile regression,
 # a neural deep ensemble, and CatBoost RMSEWithUncertainty.
 #
-# Deep Ensemble is used instead of CARD in the main baseline run: the old
-# testbed runner documents a CARD/Treeffuser segfault interaction, and CARD's
-# two-stage diffusion training makes it a better appendix-only stress test.
+# CARD is available through the selected-baseline workflow. It is omitted from
+# this older fixed-budget config because its two-stage diffusion training is
+# heavier and needs its own tuning pass.
 # The iBUG adapter uses the official `ibug` package if available; otherwise it
 # falls back to XGBoost leaf-affinity neighbors so the pixi benchmark remains
 # runnable without a PyPI extension build.
