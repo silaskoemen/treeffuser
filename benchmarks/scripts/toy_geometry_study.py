@@ -2,10 +2,11 @@
 
 Generates a 1D heteroscedastic conditional mixture and compares several Gaussian
 probability-path parameterizations under identical LightGBM regressors. The study
-isolates the first-order preconditioning effect (raw VE objectives versus
-preconditioned EDM and VP-FM): how the target scale and tree-input scale behave
-across t, how hard each per-t slice is for a fresh tree to fit, and how much
-boosting capacity each variant needs to reach a fixed accuracy.
+isolates the first-order preconditioning effect (published-style VE noise
+prediction, direct VE score prediction, raw VE-FM, preconditioned EDM, and
+VP-FM): how the target scale and tree-input scale behave across t, how hard each
+per-t slice is for a fresh tree to fit, and how much boosting capacity each
+variant needs to reach a fixed accuracy.
 
 The 1D setting is sufficient to resolve the preconditioning gap (orders of
 magnitude in target/feature scale) but not the much smaller VP-vs-linear gap on
@@ -18,7 +19,7 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import lightgbm as lgb
 import matplotlib
@@ -136,6 +137,13 @@ def build_ve_score(data: ToyData, t: np.ndarray, config: StudyConfig) -> Variant
     return VariantData(feature_y=y_t, noise_feature=np.log(sigma), target=target)
 
 
+def build_ve_noise(data: ToyData, t: np.ndarray, config: StudyConfig) -> VariantData:
+    sigma, _ = ve_sigma(t, config)
+    y_t = data.y + sigma * data.z
+    target = -data.z
+    return VariantData(feature_y=y_t, noise_feature=np.log(sigma), target=target)
+
+
 def build_ve_raw_velocity(data: ToyData, t: np.ndarray, config: StudyConfig) -> VariantData:
     sigma, sigma_dot = ve_sigma(t, config)
     y_t = data.y + sigma * data.z
@@ -169,12 +177,27 @@ def build_linear_velocity(data: ToyData, t: np.ndarray, config: StudyConfig) -> 
 
 def variants() -> list[Variant]:
     return [
-        Variant("ve_score", "VE score", build_ve_score),
+        Variant("ve_direct_score", "VE direct score", build_ve_score),
+        Variant("ve_noise", "VE noise/published target", build_ve_noise),
         Variant("ve_raw_velocity", "VE raw velocity", build_ve_raw_velocity),
         Variant("ve_edm_noise", "VE EDM/noise", build_ve_edm_noise),
         Variant("vp_velocity", "VP velocity", build_vp_velocity),
         Variant("linear_velocity", "Linear velocity", build_linear_velocity),
     ]
+
+
+LINE_STYLES = {
+    "VE direct score": {"color": "#4C78A8", "linestyle": "-", "marker": "o", "zorder": 6},
+    "VE noise/published target": {"color": "#F58518", "linestyle": (0, (5, 2)), "marker": "s", "zorder": 7},
+    "VE raw velocity": {"color": "#54A24B", "linestyle": (0, (1, 2)), "marker": "^", "zorder": 8},
+    "VE EDM/noise": {"color": "#B279A2", "linestyle": "-.", "marker": "D", "zorder": 9},
+    "VP velocity": {"color": "#E45756", "linestyle": "-", "marker": "P", "zorder": 5},
+    "Linear velocity": {"color": "#72B7B2", "linestyle": "--", "marker": "X", "zorder": 4},
+}
+
+
+def style_for(label: str) -> dict[str, Any]:
+    return LINE_STYLES[label]
 
 
 def features_from_variant(data: ToyData, t: np.ndarray, variant_data: VariantData) -> pd.DataFrame:
@@ -346,18 +369,30 @@ def capacity_sweep(
 def plot_per_slice(per_slice: pd.DataFrame, output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(7.0, 4.2), constrained_layout=True)
     for label, group in per_slice.groupby("label", sort=False):
+        style = style_for(label)
         ax.plot(
             group["t"],
             group["per_slice_relative_rmse"],
-            marker="o",
+            marker=style["marker"],
+            color=style["color"],
+            linestyle=style["linestyle"],
             linewidth=1.8,
             markersize=3.2,
             label=label,
+            alpha=0.8,
+            zorder=style["zorder"],
         )
     ax.set_xlabel("t")
     ax.set_ylabel("Per-slice relative RMSE")
     ax.set_yscale("log")
     ax.grid(True, alpha=0.25)
+    ax.text(
+        0.02,
+        0.04,
+        "VE variants overlap here by fixed-t scalar equivalence.",
+        transform=ax.transAxes,
+        fontsize=7,
+    )
     ax.legend(frameon=False, fontsize=8)
     fig.savefig(output_dir / "per_slice_error_by_t.pdf")
     plt.close(fig)
@@ -369,19 +404,31 @@ def plot_capacity_sweep(capacity: pd.DataFrame, output_dir: Path) -> None:
     ].mean()
     fig, ax = plt.subplots(figsize=(7.0, 4.2), constrained_layout=True)
     for label, group in aggregated.groupby("label", sort=False):
+        style = style_for(label)
         ax.plot(
             group["n_estimators"],
             group["capacity_relative_rmse"],
-            marker="o",
+            marker=style["marker"],
+            color=style["color"],
+            linestyle=style["linestyle"],
             linewidth=1.8,
             markersize=3.6,
             label=label,
+            alpha=0.8,
+            zorder=style["zorder"],
         )
     ax.set_xlabel("n_estimators (LightGBM rounds)")
     ax.set_ylabel("Relative RMSE (avg over t)")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.grid(True, which="both", alpha=0.25)
+    ax.text(
+        0.02,
+        0.04,
+        "VE variants overlap here by fixed-t scalar equivalence.",
+        transform=ax.transAxes,
+        fontsize=7,
+    )
     ax.legend(frameon=False, fontsize=8)
     fig.savefig(output_dir / "capacity_sweep.pdf")
     plt.close(fig)
@@ -392,33 +439,75 @@ def plot_paper_figure(
     per_slice: pd.DataFrame,
     output_dir: Path,
 ) -> None:
-    """Two-panel figure for App A: feature scale + intrinsic per-slice difficulty."""
-    fig, axes = plt.subplots(1, 2, figsize=(9.2, 3.6), constrained_layout=True)
+    """Three-panel appendix figure for scale and fixed-t difficulty."""
+    fig, axes = plt.subplots(1, 3, figsize=(12.2, 3.6), constrained_layout=True)
 
-    ax_left, ax_right = axes
+    ax_target, ax_feature, ax_slice = axes
     for label, group in results.groupby("label", sort=False):
-        ax_left.plot(group["t"], group["feature_rms"], marker="o", linewidth=1.6, markersize=3.0, label=label)
-    ax_left.set_xlabel("t")
-    ax_left.set_ylabel("Tree-input RMS")
-    ax_left.set_yscale("log")
-    ax_left.grid(True, which="both", alpha=0.25)
-    ax_left.set_title("(a) Path feature scale", fontsize=10)
-
-    for label, group in per_slice.groupby("label", sort=False):
-        ax_right.plot(
+        style = style_for(label)
+        ax_target.plot(
             group["t"],
-            group["per_slice_relative_rmse"],
-            marker="o",
+            group["target_rms"],
+            marker=style["marker"],
+            color=style["color"],
+            linestyle=style["linestyle"],
             linewidth=1.6,
             markersize=3.0,
             label=label,
+            alpha=0.8,
+            zorder=style["zorder"],
         )
-    ax_right.set_xlabel("t")
-    ax_right.set_ylabel("Per-slice relative RMSE")
-    ax_right.set_yscale("log")
-    ax_right.grid(True, which="both", alpha=0.25)
-    ax_right.set_title("(b) Intrinsic per-slice difficulty", fontsize=10)
-    ax_right.legend(frameon=False, fontsize=8, loc="best")
+        ax_feature.plot(
+            group["t"],
+            group["feature_rms"],
+            marker=style["marker"],
+            color=style["color"],
+            linestyle=style["linestyle"],
+            linewidth=1.6,
+            markersize=3.0,
+            label=label,
+            alpha=0.8,
+            zorder=style["zorder"],
+        )
+    ax_target.set_xlabel("t")
+    ax_target.set_ylabel("Target RMS")
+    ax_target.set_yscale("log")
+    ax_target.grid(True, which="both", alpha=0.25)
+    ax_target.set_title("(a) Target scale", fontsize=10)
+
+    ax_feature.set_xlabel("t")
+    ax_feature.set_ylabel("Tree-input RMS")
+    ax_feature.set_yscale("log")
+    ax_feature.grid(True, which="both", alpha=0.25)
+    ax_feature.set_title("(b) Path feature scale", fontsize=10)
+
+    for label, group in per_slice.groupby("label", sort=False):
+        style = style_for(label)
+        ax_slice.plot(
+            group["t"],
+            group["per_slice_relative_rmse"],
+            marker=style["marker"],
+            color=style["color"],
+            linestyle=style["linestyle"],
+            linewidth=1.6,
+            markersize=3.0,
+            label=label,
+            alpha=0.8,
+            zorder=style["zorder"],
+        )
+    ax_slice.set_xlabel("t")
+    ax_slice.set_ylabel("Per-slice relative RMSE")
+    ax_slice.set_yscale("log")
+    ax_slice.grid(True, which="both", alpha=0.25)
+    ax_slice.set_title("(c) Fixed-t difficulty", fontsize=10)
+    ax_slice.text(
+        0.02,
+        0.04,
+        "VE variants overlap by fixed-t equivalence.",
+        transform=ax_slice.transAxes,
+        fontsize=7,
+    )
+    ax_slice.legend(frameon=False, fontsize=7, loc="best")
 
     fig.savefig(output_dir / "paper_figure.pdf")
     plt.close(fig)
@@ -432,7 +521,19 @@ def plot_scale_curves(results: pd.DataFrame, output_dir: Path) -> None:
     ]:
         fig, ax = plt.subplots(figsize=(7.0, 4.2), constrained_layout=True)
         for label, group in results.groupby("label", sort=False):
-            ax.plot(group["t"], group[metric], marker="o", linewidth=1.8, markersize=3.2, label=label)
+            style = style_for(label)
+            ax.plot(
+                group["t"],
+                group[metric],
+                marker=style["marker"],
+                color=style["color"],
+                linestyle=style["linestyle"],
+                linewidth=1.8,
+                markersize=3.2,
+                label=label,
+                alpha=0.8,
+                zorder=style["zorder"],
+            )
         ax.set_xlabel("t")
         ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.25)
@@ -445,7 +546,8 @@ def plot_scale_curves(results: pd.DataFrame, output_dir: Path) -> None:
 
 def plot_target_slices(eval_data: ToyData, config: StudyConfig, output_dir: Path) -> None:
     shown_variants = [
-        Variant("ve_score", "VE score", build_ve_score),
+        Variant("ve_direct_score", "VE direct score", build_ve_score),
+        Variant("ve_noise", "VE noise/published target", build_ve_noise),
         Variant("ve_edm_noise", "VE EDM/noise", build_ve_edm_noise),
         Variant("vp_velocity", "VP velocity", build_vp_velocity),
     ]
@@ -457,7 +559,7 @@ def plot_target_slices(eval_data: ToyData, config: StudyConfig, output_dir: Path
     fig, axes = plt.subplots(
         len(shown_variants),
         len(shown_t),
-        figsize=(9.2, 6.4),
+        figsize=(9.2, 8.0),
         sharex=False,
         sharey=False,
         constrained_layout=True,
@@ -519,13 +621,15 @@ def write_summary(
         "config": {key: str(value) if isinstance(value, Path) else value for key, value in asdict(config).items()},
         "variants": summary_rows,
         "interpretation": (
-            "Reframed as a preconditioning study. The dominant first-order effect is between raw VE objectives "
-            "(score, raw velocity), whose target RMS spans orders of magnitude across t, and preconditioned "
-            "variants (EDM, VP-FM) that hold target and tree-input RMS near unit scale. The per-slice column "
+            "Reframed as a preconditioning study. The published-style VE noise target has unit RMS, while direct "
+            "VE score prediction and raw VE-FM span orders of magnitude across t. The published-style VE problem "
+            "still has the unpreconditioned VE tree-input scale y0 + sigma z; EDM rescales that input through "
+            "c_in, and VP-FM keeps the path feature near standardized scale by construction. The per-slice column "
             "isolates intrinsic slice difficulty by fitting a fresh LightGBM at each t with no t or noise feature; "
-            "the capacity curve reports relative RMSE averaged over t={0.1, 0.5, 0.9} as a function of "
-            "n_estimators. The 1D toy resolves preconditioning cleanly but is too low-dimensional to surface "
-            "the marginal VP-vs-linear gap that real-data path-ablation runs measure (App G)."
+            "the VE curves intentionally overlap there because the targets/features differ only by fixed-t scalar "
+            "maps. The capacity curve reports relative RMSE averaged over t={0.1, 0.5, 0.9} as a function of "
+            "n_estimators. The 1D toy resolves preconditioning cleanly but is too low-dimensional to surface the "
+            "marginal VP-vs-linear gap that real-data path-ablation runs measure (App G)."
         ),
     }
     with (output_dir / "summary.json").open("w") as file:

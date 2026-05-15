@@ -1,123 +1,243 @@
 [
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.1,
     "n_estimators":5,
     "capacity_rmse":46.3575683185,
     "capacity_relative_rmse":0.9957682651
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.1,
     "n_estimators":15,
     "capacity_rmse":46.2744501262,
     "capacity_relative_rmse":0.9939828725
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.1,
     "n_estimators":45,
     "capacity_rmse":46.4771755546,
     "capacity_relative_rmse":0.9983374484
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.1,
     "n_estimators":135,
     "capacity_rmse":46.9271650435,
     "capacity_relative_rmse":1.0080032973
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.1,
     "n_estimators":400,
     "capacity_rmse":47.7458362798,
     "capacity_relative_rmse":1.0255884914
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.5,
     "n_estimators":5,
     "capacity_rmse":1.8627198335,
     "capacity_relative_rmse":0.8367527943
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.5,
     "n_estimators":15,
     "capacity_rmse":1.5110022618,
     "capacity_relative_rmse":0.678757665
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.5,
     "n_estimators":45,
     "capacity_rmse":1.270362629,
     "capacity_relative_rmse":0.5706598816
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.5,
     "n_estimators":135,
     "capacity_rmse":1.2304940747,
     "capacity_relative_rmse":0.5527505193
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.5,
     "n_estimators":400,
     "capacity_rmse":1.2496669256,
     "capacity_relative_rmse":0.56136316
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.9,
     "n_estimators":5,
     "capacity_rmse":0.0748279555,
     "capacity_relative_rmse":0.7029517393
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.9,
     "n_estimators":15,
     "capacity_rmse":0.0381404943,
     "capacity_relative_rmse":0.3583009402
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.9,
     "n_estimators":45,
     "capacity_rmse":0.0119069142,
     "capacity_relative_rmse":0.1118564048
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.9,
     "n_estimators":135,
     "capacity_rmse":0.0110640157,
     "capacity_relative_rmse":0.1039380141
   },
   {
-    "variant":"ve_score",
-    "label":"VE score",
+    "variant":"ve_direct_score",
+    "label":"VE direct score",
     "t":0.9,
     "n_estimators":400,
     "capacity_rmse":0.0112057115,
     "capacity_relative_rmse":0.1052691379
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.1,
+    "n_estimators":5,
+    "capacity_rmse":0.9913423204,
+    "capacity_relative_rmse":0.9957682651
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.1,
+    "n_estimators":15,
+    "capacity_rmse":0.9895648634,
+    "capacity_relative_rmse":0.9939828725
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.1,
+    "n_estimators":45,
+    "capacity_rmse":0.9939000842,
+    "capacity_relative_rmse":0.9983374483
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.1,
+    "n_estimators":135,
+    "capacity_rmse":1.0035229709,
+    "capacity_relative_rmse":1.0080032973
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.1,
+    "n_estimators":400,
+    "capacity_rmse":1.0210300032,
+    "capacity_relative_rmse":1.0255884915
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.5,
+    "n_estimators":5,
+    "capacity_rmse":0.8330336339,
+    "capacity_relative_rmse":0.8367527941
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.5,
+    "n_estimators":15,
+    "capacity_rmse":0.6757407542,
+    "capacity_relative_rmse":0.6787576648
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.5,
+    "n_estimators":45,
+    "capacity_rmse":0.5681234388,
+    "capacity_relative_rmse":0.5706598814
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.5,
+    "n_estimators":135,
+    "capacity_rmse":0.5502936795,
+    "capacity_relative_rmse":0.5527505194
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.5,
+    "n_estimators":400,
+    "capacity_rmse":0.558868039,
+    "capacity_relative_rmse":0.56136316
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.9,
+    "n_estimators":5,
+    "capacity_rmse":0.6998272927,
+    "capacity_relative_rmse":0.7029517401
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.9,
+    "n_estimators":15,
+    "capacity_rmse":0.3567083816,
+    "capacity_relative_rmse":0.358300941
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.9,
+    "n_estimators":45,
+    "capacity_rmse":0.1113592304,
+    "capacity_relative_rmse":0.1118564045
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.9,
+    "n_estimators":135,
+    "capacity_rmse":0.1034760351,
+    "capacity_relative_rmse":0.103938014
+  },
+  {
+    "variant":"ve_noise",
+    "label":"VE noise\/published target",
+    "t":0.9,
+    "n_estimators":400,
+    "capacity_rmse":0.1048012423,
+    "capacity_relative_rmse":0.1052691377
   },
   {
     "variant":"ve_raw_velocity",

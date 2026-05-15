@@ -15,7 +15,7 @@
   },
   "variants": [
     {
-      "label": "VE score",
+      "label": "VE direct score",
       "target_scale_ratio": 1475.6684626962995,
       "feature_scale_ratio": 17.14129643022409,
       "median_relative_rmse": 0.9982872042986952,
@@ -42,6 +42,37 @@
         {
           "n_estimators": 400,
           "relative_rmse": 0.5640735964194923
+        }
+      ]
+    },
+    {
+      "label": "VE noise/published target",
+      "target_scale_ratio": 1.0,
+      "feature_scale_ratio": 17.14129643022409,
+      "median_relative_rmse": 0.6164292118338567,
+      "max_relative_rmse": 1.0074620787138238,
+      "median_per_slice_relative_rmse": 0.5586410120226561,
+      "max_per_slice_relative_rmse": 1.0140587642514862,
+      "capacity_curve": [
+        {
+          "n_estimators": 5,
+          "relative_rmse": 0.8451575997414896
+        },
+        {
+          "n_estimators": 15,
+          "relative_rmse": 0.6770138261121561
+        },
+        {
+          "n_estimators": 45,
+          "relative_rmse": 0.5602845780998859
+        },
+        {
+          "n_estimators": 135,
+          "relative_rmse": 0.5548972769027367
+        },
+        {
+          "n_estimators": 400,
+          "relative_rmse": 0.5640735964176247
         }
       ]
     },
@@ -170,5 +201,5 @@
       ]
     }
   ],
-  "interpretation": "Reframed as a preconditioning study. The dominant first-order effect is between raw VE objectives (score, raw velocity), whose target RMS spans orders of magnitude across t, and preconditioned variants (EDM, VP-FM) that hold target and tree-input RMS near unit scale. The per-slice column isolates intrinsic slice difficulty by fitting a fresh LightGBM at each t with no t or noise feature; the capacity curve reports relative RMSE averaged over t={0.1, 0.5, 0.9} as a function of n_estimators. The 1D toy resolves preconditioning cleanly but is too low-dimensional to surface the marginal VP-vs-linear gap that real-data path-ablation runs measure (App G)."
+  "interpretation": "Reframed as a preconditioning study. The published-style VE noise target has unit RMS, while direct VE score prediction and raw VE-FM span orders of magnitude across t. The published-style VE problem still has the unpreconditioned VE tree-input scale y0 + sigma z; EDM rescales that input through c_in, and VP-FM keeps the path feature near standardized scale by construction. The per-slice column isolates intrinsic slice difficulty by fitting a fresh LightGBM at each t with no t or noise feature; the VE curves intentionally overlap there because the targets/features differ only by fixed-t scalar maps. The capacity curve reports relative RMSE averaged over t={0.1, 0.5, 0.9} as a function of n_estimators. The 1D toy resolves preconditioning cleanly but is too low-dimensional to surface the marginal VP-vs-linear gap that real-data path-ablation runs measure (App G)."
 }
