@@ -60,6 +60,8 @@ xgboost = ">=2,<4"
 catboost = ">=1.2,<2"
 pytorch = ">=2.4,<3"
 matplotlib = "*"
+optuna = ">=4.8.0,<5"
+loguru = ">=0.7.3,<0.8"
 
 [feature.bench.tasks]
 bench-smoke = "python -m benchmarks.run --config benchmarks/configs/smoke.yaml"

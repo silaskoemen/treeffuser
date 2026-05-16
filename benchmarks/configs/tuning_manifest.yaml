@@ -1,0 +1,58 @@
+# Per-dataset tuning manifest for the fold-0 tuning / folds-1..5 evaluation protocol.
+# Edit this file to add datasets, add model spaces, or override per-space budgets.
+
+protocol:
+  version: tune-fold0-eval-folds1-5-v1
+  master_seed: 0
+  n_folds: 6
+  n_trials: 25
+  n_samples: 100
+  max_attempts_multiplier: 2
+  results_dir: benchmarks/results/tuning/studies
+  configs_dir: benchmarks/results/tuning/best_params
+  eval_results_dir: benchmarks/results/tuning/eval
+  status_path: benchmarks/results/tuning/batch_status.jsonl
+
+datasets:
+  - name: yacht
+    n_train: 277
+    n_test: 31
+  - name: concrete
+    n_train: 927
+    n_test: 103
+  - name: energy
+    n_train: 691
+    n_test: 77
+  - name: diabetes
+    n_train: 400
+    n_test: 42
+  - name: wine
+    n_train: 5847
+    n_test: 650
+  - name: kin8nm
+    n_train: 7372
+    n_test: 820
+  - name: power_plant
+    n_train: 8611
+    n_test: 957
+  - name: naval
+    n_train: 10741
+    n_test: 1193
+  - name: california_housing
+    n_train: 18576
+    n_test: 2064
+  - name: protein
+    n_train: 41157
+    n_test: 4573
+
+spaces:
+  - name: treeffuser_published
+  - name: treeffuser_score_plus
+  - name: treeffuser_fm
+  - name: ngboost
+  - name: ibug
+  - name: drf
+  - name: qreg_lightgbm
+  - name: deep_ensemble
+  - name: card
+  - name: catboost_uncertainty
