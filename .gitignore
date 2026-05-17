@@ -7,7 +7,11 @@ __pycache__
 *.bak
 .DS_Store
 
+# Temp/storage files
 plans
+
+# Optuna studies
+**/*.db
 
 # C extensions
 *.so

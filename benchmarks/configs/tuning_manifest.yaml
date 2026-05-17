@@ -52,6 +52,8 @@ spaces:
   - name: ngboost
   - name: ibug
   - name: drf
+    enabled: false
+  # Cap the expensive dimension: qreg trains one LightGBM per quantile.
   - name: qreg_lightgbm
   - name: deep_ensemble
   - name: card

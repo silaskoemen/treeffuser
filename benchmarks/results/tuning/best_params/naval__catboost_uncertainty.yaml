@@ -1,0 +1,28 @@
+protocol:
+  dataset: naval
+  space_name: catboost_uncertainty
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 10741
+  n_test: 1193
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 02fdee16af09d60f
+protocol_fingerprint: f46e80798208ff6d
+model: catboost_uncertainty
+best_value_crps: 0.0003314413190407862
+best_tunable:
+  iterations: 1363
+  learning_rate: 0.03658488222469588
+  depth: 10
+params:
+  early_stopping_rounds: 50
+  iterations: 1363
+  learning_rate: 0.03658488222469588
+  depth: 10
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/naval__catboost_uncertainty__f46e80798208ff6d.db

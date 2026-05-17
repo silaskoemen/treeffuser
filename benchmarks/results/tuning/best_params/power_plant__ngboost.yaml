@@ -1,0 +1,26 @@
+protocol:
+  dataset: power_plant
+  space_name: ngboost
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 8611
+  n_test: 957
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: e0b66aee97485f0b
+protocol_fingerprint: ff367cb9471f0024
+model: ngboost
+best_value_crps: 2.0318292845577526
+best_tunable:
+  n_estimators: 357
+  learning_rate: 0.29910348231056555
+params:
+  early_stopping_rounds: 50
+  n_estimators: 357
+  learning_rate: 0.29910348231056555
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/power_plant__ngboost__ff367cb9471f0024.db

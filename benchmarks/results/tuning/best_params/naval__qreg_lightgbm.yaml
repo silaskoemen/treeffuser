@@ -1,0 +1,32 @@
+protocol:
+  dataset: naval
+  space_name: qreg_lightgbm
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 10741
+  n_test: 1193
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 44905d54d09ef0dd
+protocol_fingerprint: fc26f4079877b392
+model: qreg_lightgbm
+best_value_crps: 0.000251843239868287
+best_tunable:
+  quantile_count: 24
+  n_estimators: 340
+  learning_rate: 0.12000151987223509
+  num_leaves: 113
+params:
+  min_child_samples: 20
+  n_jobs: -1
+  early_stopping_rounds: 30
+  quantile_count: 24
+  n_estimators: 340
+  learning_rate: 0.12000151987223509
+  num_leaves: 113
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/naval__qreg_lightgbm__fc26f4079877b392.db

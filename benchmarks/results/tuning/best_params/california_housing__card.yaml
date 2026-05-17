@@ -1,0 +1,37 @@
+protocol:
+  dataset: california_housing
+  space_name: card
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 18576
+  n_test: 2064
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 13256b5a30f98c57
+protocol_fingerprint: d5b25561454fcf2f
+model: card
+best_value_crps: 0.24984397087724272
+best_tunable:
+  hidden_size: 128
+  n_layers: 5
+  learning_rate: 0.006321641091491959
+  max_epochs: 200
+  diffusion_epochs: 200
+  n_steps: 200
+params:
+  beta_start: 0.0001
+  beta_end: 0.02
+  dropout: 0.01
+  patience: 25
+  hidden_size: 128
+  n_layers: 5
+  learning_rate: 0.006321641091491959
+  max_epochs: 200
+  diffusion_epochs: 200
+  n_steps: 200
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/california_housing__card__d5b25561454fcf2f.db

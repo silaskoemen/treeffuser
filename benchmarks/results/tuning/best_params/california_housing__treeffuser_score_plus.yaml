@@ -1,0 +1,59 @@
+protocol:
+  dataset: california_housing
+  space_name: treeffuser_score_plus
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 18576
+  n_test: 2064
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: bb220df7bf865b1d
+protocol_fingerprint: 076b618df759ddf3
+model: treeffuser
+best_value_crps: 0.21258201224577142
+best_tunable:
+  n_estimators: 1002
+  learning_rate: 0.045048619608171976
+  num_leaves: 229
+  max_depth: -1
+  min_child_samples: 43
+  subsample: 0.7612609176013192
+params:
+  early_stopping_rounds: 50
+  n_repeats: 30
+  subsample_freq: 1
+  verbose: -1
+  training_objective: score
+  score_parameterization: edm
+  noise_features: raw_time_log_std
+  t_sampling: log_sigma_normal
+  log_sigma_p_mean: -1.2
+  log_sigma_p_std: 1.2
+  residualize: mean
+  residualize_k_folds: 5
+  extra_residualizer_params:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: -1
+    num_leaves: 63
+    min_child_samples: 10
+  sde_name: vesde
+  sde_hyperparam_min: 0.01
+  sde_hyperparam_max: 20.0
+  n_estimators: 1002
+  learning_rate: 0.045048619608171976
+  num_leaves: 229
+  max_depth: -1
+  min_child_samples: 43
+  subsample: 0.7612609176013192
+sampler:
+  n_samples: 200
+  n_parallel: 20
+  n_steps: 25
+  method: heun
+  pf_ode: true
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/california_housing__treeffuser_score_plus__076b618df759ddf3.db

@@ -1,0 +1,29 @@
+protocol:
+  dataset: protein
+  space_name: ibug
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 41157
+  n_test: 4573
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 39d4e2d964f72eb1
+protocol_fingerprint: 2346701a1997d0eb
+model: ibug
+best_value_crps: 1.76191551873524
+best_tunable:
+  k: 10
+  n_estimators: 1360
+  learning_rate: 0.08464252827630284
+  max_depth: 9
+params:
+  k: 10
+  n_estimators: 1360
+  learning_rate: 0.08464252827630284
+  max_depth: 9
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/protein__ibug__2346701a1997d0eb.db

@@ -14423,7 +14423,7 @@ packages:
 - pypi: ./
   name: treeffuser
   version: 0.1.3
-  sha256: edbef5f76f23e345dcc71916636b47e950c1a54f76360efe7c5f6efefe309a6b
+  sha256: 9a64b54cafe1be33a08a0c1610d9d5bac7a7bec601da0cff508fb8c283969baf
   requires_dist:
   - numpy
   - jaxtyping

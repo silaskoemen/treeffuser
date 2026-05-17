@@ -69,7 +69,7 @@ bench-synthetic = "python -m benchmarks.run --config benchmarks/configs/syntheti
 bench-real = "python -m benchmarks.run --config benchmarks/configs/real_smoke.yaml"
 bench-paper-baselines = "python -m benchmarks.run --config benchmarks/configs/paper_probabilistic_baselines.yaml"
 toy-geometry = "python -m benchmarks.scripts.toy_geometry_study"
-paper = { cmd = "latexmk -pdf -interaction=nonstopmode uai2026-main.tex", cwd = "paper" }
+paper = { cmd = "latexmk -pdf -interaction=nonstopmode tpm2026-main.tex", cwd = "paper" }
 
 [feature.build.dependencies]
 python-build = "*"

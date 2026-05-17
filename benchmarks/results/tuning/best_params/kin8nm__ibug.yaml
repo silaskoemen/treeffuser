@@ -1,0 +1,29 @@
+protocol:
+  dataset: kin8nm
+  space_name: ibug
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 7372
+  n_test: 820
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 39d4e2d964f72eb1
+protocol_fingerprint: f4902b094a4e4eaf
+model: ibug
+best_value_crps: 0.07357462962272554
+best_tunable:
+  k: 14
+  n_estimators: 1479
+  learning_rate: 0.16230709744686408
+  max_depth: 9
+params:
+  k: 14
+  n_estimators: 1479
+  learning_rate: 0.16230709744686408
+  max_depth: 9
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/kin8nm__ibug__f4902b094a4e4eaf.db

@@ -1,0 +1,29 @@
+protocol:
+  dataset: yacht
+  space_name: ibug
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 277
+  n_test: 31
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 39d4e2d964f72eb1
+protocol_fingerprint: ef075975aa34cc83
+model: ibug
+best_value_crps: 0.3277385576923076
+best_tunable:
+  k: 10
+  n_estimators: 1003
+  learning_rate: 0.05824205085479937
+  max_depth: 9
+params:
+  k: 10
+  n_estimators: 1003
+  learning_rate: 0.05824205085479937
+  max_depth: 9
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/yacht__ibug__ef075975aa34cc83.db

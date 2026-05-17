@@ -1,0 +1,32 @@
+protocol:
+  dataset: diabetes
+  space_name: deep_ensemble
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 400
+  n_test: 42
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: cbaee7ef86e6cc43
+protocol_fingerprint: 51165c2155c1fe32
+model: deep_ensemble
+best_value_crps: 31.419167947635128
+best_tunable:
+  hidden_size: 128
+  n_layers: 4
+  learning_rate: 0.0001523798712185144
+  max_epochs: 100
+params:
+  n_ensembles: 5
+  patience: 25
+  batch_size: 256
+  hidden_size: 128
+  n_layers: 4
+  learning_rate: 0.0001523798712185144
+  max_epochs: 100
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/diabetes__deep_ensemble__51165c2155c1fe32.db

@@ -1,0 +1,37 @@
+protocol:
+  dataset: yacht
+  space_name: card
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 277
+  n_test: 31
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 13256b5a30f98c57
+protocol_fingerprint: 4aeafa4cac9772c3
+model: card
+best_value_crps: 0.7161003622073394
+best_tunable:
+  hidden_size: 256
+  n_layers: 4
+  learning_rate: 0.0019479421698399245
+  max_epochs: 400
+  diffusion_epochs: 200
+  n_steps: 100
+params:
+  beta_start: 0.0001
+  beta_end: 0.02
+  dropout: 0.01
+  patience: 25
+  hidden_size: 256
+  n_layers: 4
+  learning_rate: 0.0019479421698399245
+  max_epochs: 400
+  diffusion_epochs: 200
+  n_steps: 100
+sampler: null
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/yacht__card__4aeafa4cac9772c3.db

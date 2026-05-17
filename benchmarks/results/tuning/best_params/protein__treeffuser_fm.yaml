@@ -1,0 +1,55 @@
+protocol:
+  dataset: protein
+  space_name: treeffuser_fm
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 41157
+  n_test: 4573
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 73b1d7a34cdbf2a2
+protocol_fingerprint: c618d98ac61a4e2e
+model: treeffuser
+best_value_crps: 1.8076951779273978
+best_tunable:
+  n_estimators: 888
+  learning_rate: 0.05347333191548912
+  num_leaves: 153
+  max_depth: 10
+  min_child_samples: 95
+  subsample: 0.6477677422520028
+params:
+  early_stopping_rounds: 50
+  n_repeats: 30
+  subsample_freq: 1
+  verbose: -1
+  training_objective: flow_matching
+  flow_path: vp
+  noise_features: raw_time
+  residualize: mean
+  residualize_k_folds: 5
+  extra_residualizer_params:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: -1
+    num_leaves: 63
+    min_child_samples: 10
+  n_estimators: 888
+  learning_rate: 0.05347333191548912
+  num_leaves: 153
+  max_depth: 10
+  min_child_samples: 95
+  subsample: 0.6477677422520028
+sampler:
+  n_samples: 200
+  n_parallel: 20
+  n_steps: 5
+  method: heun
+  pf_ode: false
+  velocity_stochasticity: 0.0
+  velocity_stochasticity_schedule: linear
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/protein__treeffuser_fm__c618d98ac61a4e2e.db

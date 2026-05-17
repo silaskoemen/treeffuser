@@ -1,0 +1,48 @@
+protocol:
+  dataset: naval
+  space_name: treeffuser_published
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 10741
+  n_test: 1193
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 7b45b0431e9635d4
+protocol_fingerprint: e3d6b9ea45a75725
+model: treeffuser
+best_value_crps: 0.00020697894824839026
+best_tunable:
+  n_estimators: 683
+  learning_rate: 0.1420073165738692
+  num_leaves: 218
+  max_depth: -1
+  min_child_samples: 23
+  subsample: 0.6337307733356163
+params:
+  early_stopping_rounds: 50
+  n_repeats: 30
+  subsample_freq: 1
+  verbose: -1
+  training_objective: score
+  score_parameterization: noise
+  noise_features: raw_time
+  t_sampling: uniform
+  residualize: 'off'
+  sde_name: vesde
+  n_estimators: 683
+  learning_rate: 0.1420073165738692
+  num_leaves: 218
+  max_depth: -1
+  min_child_samples: 23
+  subsample: 0.6337307733356163
+sampler:
+  n_samples: 200
+  n_parallel: 20
+  n_steps: 50
+  method: euler
+  pf_ode: false
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/naval__treeffuser_published__e3d6b9ea45a75725.db

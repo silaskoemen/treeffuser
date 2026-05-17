@@ -1,0 +1,48 @@
+protocol:
+  dataset: yacht
+  space_name: treeffuser_published
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 277
+  n_test: 31
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 7b45b0431e9635d4
+protocol_fingerprint: b9d8063b51840a30
+model: treeffuser
+best_value_crps: 0.2837844408136015
+best_tunable:
+  n_estimators: 2739
+  learning_rate: 0.2730806817266488
+  num_leaves: 20
+  max_depth: 10
+  min_child_samples: 7
+  subsample: 0.806693242666008
+params:
+  early_stopping_rounds: 50
+  n_repeats: 30
+  subsample_freq: 1
+  verbose: -1
+  training_objective: score
+  score_parameterization: noise
+  noise_features: raw_time
+  t_sampling: uniform
+  residualize: 'off'
+  sde_name: vesde
+  n_estimators: 2739
+  learning_rate: 0.2730806817266488
+  num_leaves: 20
+  max_depth: 10
+  min_child_samples: 7
+  subsample: 0.806693242666008
+sampler:
+  n_samples: 200
+  n_parallel: 20
+  n_steps: 50
+  method: euler
+  pf_ode: false
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/yacht__treeffuser_published__b9d8063b51840a30.db

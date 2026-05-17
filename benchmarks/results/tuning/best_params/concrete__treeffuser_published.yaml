@@ -1,0 +1,48 @@
+protocol:
+  dataset: concrete
+  space_name: treeffuser_published
+  protocol_version: tune-fold0-eval-folds1-5-v1
+  n_train: 927
+  n_test: 103
+  x_dim: 3
+  master_seed: 0
+  n_folds: 6
+  n_samples: 100
+  space_fingerprint: 7b45b0431e9635d4
+protocol_fingerprint: 95996ac7d2024718
+model: treeffuser
+best_value_crps: 2.21173190027647
+best_tunable:
+  n_estimators: 1615
+  learning_rate: 0.06958319606929657
+  num_leaves: 94
+  max_depth: 10
+  min_child_samples: 63
+  subsample: 0.8386370276993214
+params:
+  early_stopping_rounds: 50
+  n_repeats: 30
+  subsample_freq: 1
+  verbose: -1
+  training_objective: score
+  score_parameterization: noise
+  noise_features: raw_time
+  t_sampling: uniform
+  residualize: 'off'
+  sde_name: vesde
+  n_estimators: 1615
+  learning_rate: 0.06958319606929657
+  num_leaves: 94
+  max_depth: 10
+  min_child_samples: 63
+  subsample: 0.8386370276993214
+sampler:
+  n_samples: 200
+  n_parallel: 20
+  n_steps: 50
+  method: euler
+  pf_ode: false
+n_trials_target: 25
+n_trials_finite: 25
+n_trials_failed: 0
+storage: /Users/silaskoemen/Documents/Projects/treeffuser/benchmarks/results/tuning/studies/concrete__treeffuser_published__95996ac7d2024718.db

@@ -33,7 +33,7 @@
 \maketitle
 
 \begin{abstract}
-We extend Treeffuser, a score-based diffusion model for probabilistic tabular regression with gradient-boosted trees, in two directions motivated by fast sample-based probabilistic modelling. First, we evaluate conditional-mean residualization, EDM-style preconditioning, log-sigma time sampling, and noise-level features; together these reduce 95\% coverage error from 0.029 to 0.026 and cut sampling time 3.1$\times$ over the published baseline. Second, we replace score matching with flow matching using Gaussian probability paths, use a closed-form conditional velocity-to-score mapping, and benchmark the resulting sampler family. With a VP path and deterministic Heun ODE at five steps, the flow-matching variant ties our improved score model on CRPS skill score, reduces 95\% coverage error from 0.026 to 0.017, and is a further 3.3$\times$ faster. The common mechanism is better conditioning of the supervised regression problem seen by the tree ensemble. Against six fixed-grid probabilistic baselines (NGBoost, quantile-regression LightGBM, CatBoost uncertainty, iBUG, a deep ensemble, and CARD-style neural diffusion), the Treeffuser variants have the best normalized CRPS and coverage metrics under this protocol, while quantile-regression LightGBM remains strongest on raw CRPS. Stochastic ($\varepsilon > 0$) samplers do not Pareto-dominate the deterministic corner, so the empirical recommendation is the $\varepsilon = 0$ specialization.
+We extend Treeffuser, a score-based diffusion model for probabilistic tabular regression with gradient-boosted trees, in two directions motivated by fast sample-based probabilistic modelling. First, we evaluate conditional-mean residualization, EDM-style preconditioning, log-sigma time sampling, and noise-level features; after per-dataset tuning these raise CRPS skill score from 0.670 to 0.681, reduce 95\% coverage error from 0.023 to 0.015, and cut sampling time 6.5$\times$ over the published baseline. Second, we replace score matching with flow matching using Gaussian probability paths, use a closed-form conditional velocity-to-score mapping, and benchmark the resulting sampler family. With a VP path and deterministic Heun ODE at five steps, the flow-matching variant gives the best normalized CRPS among Treeffuser rows and is another 2.4$\times$ faster than the improved score model, but gives back some of the score model's coverage advantage. The common mechanism is better conditioning of the supervised regression problem seen by the tree ensemble. Against six per-dataset tuned probabilistic baselines (NGBoost, quantile-regression LightGBM, CatBoost uncertainty, iBUG, a deep ensemble, and CARD-style neural diffusion), the Treeffuser variants have the best aggregate normalized CRPS and coverage metrics under this protocol, while tuned non-diffusion baselines still win several individual datasets on raw CRPS. Stochastic ($\varepsilon > 0$) samplers do not Pareto-dominate the deterministic corner, so the empirical recommendation is the $\varepsilon = 0$ specialization when aggregate CRPS and latency are the target.
 \end{abstract}
 
 \section{Introduction}\label{sec:intro}
@@ -50,7 +50,7 @@ This paper develops Treeffuser along two axes that interact with the tree-based 
   \item \emph{Regression-conditioning unification.} We identify regression conditioning for the tree ensemble---not the functional class itself---as the bottleneck behind both score- and flow-side gains, formalised through Propositions~\ref{prop:ve-equivalence}, \ref{prop:path-variance}, and~\ref{prop:endpoint-amp} (\S\ref{sec:disc}, Appendix~\ref{app:theory}).
 \end{enumerate}
 
-Across ten UCI probabilistic-regression benchmarks, the score-side modifications close most of the gap between the published Treeffuser and a strong score baseline; flow matching then matches the improved score model on CRPS skill score while improving its 90/95\% interval coverage error by about 35\% and reducing sampling time by another 3.3$\times$. The shared lesson is that tree-based diffusion models depend strongly on whether the noising path, parameterization, training distribution, features, and sampler make the induced supervised problem well matched to histogram splits. Stochastic samplers ($\varepsilon > 0$) do not Pareto-dominate the deterministic ODE corner on any aggregate metric, so the empirical recommendation collapses the one-parameter family to $\varepsilon = 0$.
+Across ten UCI probabilistic-regression benchmarks, with one fold reserved for tuning and five folds held out for evaluation, the score-side modifications give the best aggregate calibration and CRPS skill score, while flow matching gives the best normalized CRPS and the fastest Treeffuser sampler. The shared lesson is that tree-based diffusion models depend strongly on whether the noising path, parameterization, training distribution, features, and sampler make the induced supervised problem well matched to histogram splits. Stochastic samplers ($\varepsilon > 0$) do not Pareto-dominate the deterministic ODE corner on any aggregate metric, so the empirical recommendation collapses the one-parameter family to $\varepsilon = 0$.
 
 \section{Method}\label{sec:method}
 
@@ -91,39 +91,39 @@ The flow-matching code reuses Treeffuser's per-output-dimension LightGBM fitter 
 
 \section{Experiments}\label{sec:exp}
 
-\paragraph{Datasets and protocol.} Ten UCI benchmarks (Table~\ref{tab:per-dataset}) with 3 seeds and a fixed 90/10 train/test split using the full available row count for each dataset (post-split training rows range from 277 on yacht to 41{,}157 on protein). For each test point we draw 200 samples via Heun integration; metrics are averaged over the test set, seeds, and (for the headline) datasets.
+\paragraph{Datasets and protocol.} Ten UCI benchmarks (Table~\ref{tab:per-dataset}) are evaluated with a nested tuning protocol. We split each dataset into six folds: fold~0 is used only for hyperparameter selection, and folds~1--5 are evaluation folds. For each dataset/model family, Optuna tunes on the fold-0 train/validation split; the selected configuration is then refit and evaluated on each held-out evaluation fold. Evaluation-fold training rows range from 256 on yacht to 38{,}108 on protein. For each test point we draw 200 samples via Heun integration; metrics are averaged over evaluation folds and, for headline summaries, over datasets.
 
-\paragraph{Metrics.} We report CRPS skill score $\crpss = 1 - \crps_{\text{model}} / \crps_{\text{climatology}}$, where climatology is the empirical CDF of $y_{\text{train}}$; mean rel-CRPS (per-dataset CRPS divided by the best variant on that dataset, then averaged); the Dawid--Sebastiani score~\citep{dawid1984pit}; the fraction of (dataset, seed) pairs at which a Kolmogorov--Smirnov test on the probability integral transform fails to reject uniformity at $\alpha=0.05$ ("PIT KS $p{>}.05$"); absolute coverage error at the 50/90/95\% nominal interval levels~\citep{gneiting2007crps}; and mean sample-generation wall time per benchmark row. Timings are measured on the same Apple-arm64 workstation, exclude fitting, and include generating 200 samples per test point plus inverse transformations.
+\paragraph{Metrics.} We report CRPS skill score $\crpss = 1 - \crps_{\text{model}} / \crps_{\text{climatology}}$, where climatology is the empirical CDF of $y_{\text{train}}$; mean rel-CRPS (per-dataset CRPS divided by the best variant on that dataset, then averaged); the Dawid--Sebastiani score~\citep{dawid1984pit}; the fraction of evaluation folds at which a Kolmogorov--Smirnov test on the probability integral transform fails to reject uniformity at $\alpha=0.05$ ("PIT KS $p{>}.05$"); absolute coverage error at the 50/90/95\% nominal interval levels~\citep{gneiting2007crps}; and mean sample-generation wall time per benchmark row. Timings are measured on the same Apple-arm64 workstation, exclude fitting, and include generating 200 samples per test point plus inverse transformations.
 
-\paragraph{Variants compared.} Three Treeffuser rows attribute contributions cleanly: (1)~\textsc{published}---the original baseline with noise-prediction, uniform $t$, no residualization; (2)~\textsc{score+}---the baseline plus \S\ref{sec:score-side}; (3)~\textsc{FM}---VP flow matching with residualizer-C and a 5-step Heun ODE. All share the same LightGBM size. We also compare against six fixed-grid probabilistic baselines: NGBoost~\citep{duan2020ngboost}, quantile-regression LightGBM~\citep{ke2017lightgbm}, CatBoost RMSE-with-uncertainty~\citep{prokhorenkova2018catboost}, iBUG~\citep{brophy2022ibug}, a Gaussian deep ensemble~\citep{lakshminarayanan2017deep}, and CARD-style neural diffusion~\citep{han2022card}.
+\paragraph{Variants compared.} Three Treeffuser rows attribute contributions cleanly: (1)~\textsc{published}---the original baseline with noise-prediction, uniform $t$, no residualization; (2)~\textsc{score+}---the baseline plus \S\ref{sec:score-side}; (3)~\textsc{FM}---VP flow matching with residualization and a 5-step Heun ODE. Each row is tuned per dataset under the same fold-0 protocol. We also compare against six per-dataset tuned probabilistic baselines: NGBoost~\citep{duan2020ngboost}, quantile-regression LightGBM~\citep{ke2017lightgbm}, CatBoost RMSE-with-uncertainty~\citep{prokhorenkova2018catboost}, iBUG~\citep{brophy2022ibug}, a Gaussian deep ensemble~\citep{lakshminarayanan2017deep}, and CARD-style neural diffusion~\citep{han2022card}.
 
 \begin{table*}[!t]
   \centering
-  \caption{Headline real-data results, mean over 10 UCI benchmarks $\times$ 3 seeds. rel-CRPS is the per-dataset CRPS divided by the best displayed variant on that dataset. $|\text{cE}|$@$q$ is absolute coverage error at the $q$\% interval level.}\label{tab:headline}
+  \caption{Headline real-data results, mean over 10 UCI benchmarks with fold~0 used for tuning and folds~1--5 used for evaluation. rel-CRPS is the per-dataset CRPS divided by the best displayed variant on that dataset. $|\text{cE}|$@$q$ is absolute coverage error at the $q$\% interval level.}\label{tab:headline}
   \scriptsize
   \begin{tabular}{lrrrrrrrr}
     \toprule
     Variant & CRPSS $\uparrow$ & rel-CRPS $\downarrow$ & DSS $\downarrow$ & KS $p{>}.05$ $\uparrow$ & $|\text{cE}|$@50 $\downarrow$ & $|\text{cE}|$@90 $\downarrow$ & $|\text{cE}|$@95 $\downarrow$ & samp.\ time \\
     \midrule
-    Treeffuser-published & 0.652 & 1.240 & 1.056 & 0.20 & 0.142 & 0.053 & 0.029 & 88.1\,s \\
-    Treeffuser-score$^+$ (ours) & \textbf{0.669} & \textbf{1.047} & \textbf{$-$0.236} & \textbf{0.60} & 0.067 & 0.037 & 0.026 & 28.6\,s \\
-    Treeffuser-FM (ours) & \textbf{0.669} & 1.048 & $-$0.227 & 0.50 & 0.079 & \textbf{0.024} & \textbf{0.017} & 8.68\,s \\
+    Treeffuser-published & 0.670 & 1.242 & 1.358 & 0.40 & 0.117 & 0.044 & 0.023 & 221.35\,s \\
+    Treeffuser-score$^+$ (ours) & \textbf{0.681} & 1.131 & $-$0.214 & \textbf{0.62} & 0.069 & \textbf{0.020} & \textbf{0.015} & 34.12\,s \\
+    Treeffuser-FM (ours) & 0.680 & \textbf{1.117} & \textbf{$-$0.218} & 0.46 & \textbf{0.064} & 0.028 & 0.024 & 14.41\,s \\
     \midrule
-    QReg-LightGBM & 0.648 & 1.382 & 0.327 & 0.30 & 0.083 & 0.049 & 0.052 & 0.12\,s \\
-    CatBoost-unc. & 0.613 & 1.420 & 0.245 & 0.43 & 0.090 & 0.051 & 0.042 & \textbf{0.00\,s} \\
-    NGBoost & 0.591 & 1.420 & 0.343 & 0.43 & 0.093 & 0.070 & 0.064 & 0.09\,s \\
-    Deep ensemble & 0.529 & 3.678 & 0.907 & 0.57 & \textbf{0.051} & 0.040 & 0.026 & 0.01\,s \\
-    iBUG & 0.487 & 3.870 & 1.272 & 0.43 & 0.098 & 0.035 & 0.021 & 1.51\,s \\
-    CARD-style diffusion & 0.379 & 6.651 & 1.675 & 0.40 & 0.078 & 0.031 & 0.022 & 0.83\,s \\
+    QReg-LightGBM & 0.668 & 1.459 & 0.016 & 0.34 & 0.066 & 0.041 & 0.044 & 0.30\,s \\
+    CatBoost-unc. & 0.638 & 1.409 & 0.272 & 0.28 & 0.093 & 0.078 & 0.066 & \textbf{0.01\,s} \\
+    NGBoost & 0.601 & 1.550 & 1.957 & 0.16 & 0.119 & 0.114 & 0.101 & 0.04\,s \\
+    Deep ensemble & 0.654 & 1.519 & 0.090 & 0.26 & 0.090 & 0.032 & 0.018 & 0.03\,s \\
+    iBUG & 0.649 & 1.471 & $1.85{\times}10^7$ & 0.36 & 0.111 & 0.051 & 0.065 & 2.89\,s \\
+    CARD-style diffusion & 0.631 & 1.632 & 0.436 & 0.24 & 0.086 & 0.057 & 0.043 & 42.84\,s \\
     \bottomrule
   \end{tabular}
 \end{table*}
 
 \subsection{Headline Result}\label{sec:headline}
-Table~\ref{tab:headline} reports cross-dataset means. The score-side modifications lift CRPSS from 0.652 to 0.669, raise PIT-uniformity pass rate from 0.20 to 0.60, and cut Treeffuser sample time 3.1$\times$. Flow matching matches this CRPSS, improves score$^+$ 90/95\% coverage error by about 35\% each (0.037 to 0.024 and 0.026 to 0.017), and is another 3.3$\times$ faster, for a 10.2$\times$ speedup over the published Treeffuser sampler. Non-diffusion baselines sample faster still; Appendix~\ref{app:competitors} shows that quantile-regression LightGBM has the best raw CRPS, while the Treeffuser rows lead on normalized CRPS and coverage metrics under this protocol. Paired Wilcoxon tests across the ten datasets reject equality of score$^+$ and published CRPS at one-sided $p=0.042$; FM trends in the same direction but does not reach 0.05 against published ($p=0.053$); and FM versus score$^+$ is indistinguishable (two-sided $p=0.922$).
+Table~\ref{tab:headline} reports cross-dataset means under the tuning/evaluation protocol. The score-side modifications lift CRPSS from 0.670 to 0.681, raise PIT-uniformity pass rate from 0.40 to 0.62, reduce 90/95\% coverage error from 0.044/0.023 to 0.020/0.015, and cut Treeffuser sample time 6.5$\times$. Flow matching is close on CRPSS, has the best normalized CRPS among all displayed rows, and is another 2.4$\times$ faster than score$^+$, for a 15.4$\times$ speedup over the published sampler. The tradeoff is calibration: FM gives back part of score$^+$'s 90/95\% coverage advantage. Non-diffusion baselines sample faster still; Appendix~\ref{app:competitors} shows that tuned external baselines win some individual datasets on raw CRPS, while the Treeffuser rows lead on aggregate normalized CRPS and coverage. Paired Wilcoxon tests across the ten datasets show directional but not 0.05-level CRPS gains for score$^+$ over published (one-sided $p=0.080$) and FM over published ($p=0.065$); FM versus score$^+$ remains indistinguishable (two-sided $p=0.922$).
 
 \subsection{Per-Dataset CRPSS}\label{sec:perdata}
-Table~\ref{tab:per-dataset} shows the Treeffuser per-dataset CRPSS. The improved variants dominate the small-to-mid regime (training rows $\leq 11$k): both beat the published baseline on every such dataset except \texttt{wine}. On the two largest datasets the picture inverts: the published baseline reclaims \texttt{california\ housing} and the fast FM row trails on \texttt{protein}. The win count understates the asymmetry: published wins by tight margins on raw CRPS ($2$--$4\%$), whereas its losses on yacht, energy, concrete, kin8nm, and naval are far wider. This motivates dataset-adaptive residualizer selection rather than a single fixed recipe; Appendix~\ref{app:tail-diagnostic} also shows that stochastic samplers can improve high-uncertainty tail coverage on these datasets even when they lose on aggregate CRPS.
+Table~\ref{tab:per-dataset} shows the Treeffuser per-dataset CRPSS. The improved variants still dominate the small-to-mid regime, but the split is sharper after per-dataset tuning: score$^+$ is best on concrete and diabetes, while FM is best on energy, kin8nm, naval, power, and yacht. The published baseline remains strongest on wine and on the two largest datasets. The resulting message is not that one recipe wins everywhere, but that the score-side modifications and the FM path expose complementary Pareto points: score$^+$ is usually the calibrated choice, FM is the fast normalized-CRPS choice, and the published SDE can remain competitive when the full diffusion sampler is affordable.
 
 \begin{table}[!t]
   \centering
@@ -133,16 +133,16 @@ Table~\ref{tab:per-dataset} shows the Treeffuser per-dataset CRPSS. The improved
     \toprule
     Dataset & Train rows & Published & Score$^+$ & FM \\
     \midrule
-    yacht & 277 & 0.944 & \textbf{0.967} & 0.964 \\
-    energy & 691 & 0.953 & 0.966 & \textbf{0.966} \\
-    concrete & 927 & 0.757 & 0.807 & \textbf{0.809} \\
-    diabetes & 400 & 0.120 & 0.126 & \textbf{0.129} \\
-    wine & 5847 & \textbf{0.338} & 0.312 & 0.312 \\
-    kin8nm & 7372 & 0.507 & 0.603 & \textbf{0.612} \\
-    power & 8611 & 0.824 & \textbf{0.839} & 0.839 \\
-    naval & 10741 & 0.938 & 0.952 & \textbf{0.953} \\
-    cali.\ housing & 18576 & \textbf{0.670} & 0.663 & 0.660 \\
-    protein & 41157 & \textbf{0.471} & 0.453 & 0.449 \\
+    yacht & 256 & 0.941 & \textbf{0.962} & \textbf{0.962} \\
+    diabetes & 368 & 0.201 & \textbf{0.241} & 0.226 \\
+    energy & 640 & 0.956 & 0.962 & \textbf{0.964} \\
+    concrete & 858 & 0.740 & \textbf{0.774} & 0.771 \\
+    wine & 5414 & \textbf{0.346} & 0.305 & 0.307 \\
+    kin8nm & 6826 & 0.555 & 0.617 & \textbf{0.631} \\
+    power & 7973 & 0.829 & 0.839 & \textbf{0.843} \\
+    naval & 9945 & 0.950 & 0.949 & \textbf{0.951} \\
+    cali.\ housing & 17200 & \textbf{0.687} & 0.676 & 0.674 \\
+    protein & 38108 & \textbf{0.494} & 0.480 & 0.472 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -157,11 +157,11 @@ Across the same ten datasets we compare linear, trigonometric, and VP paths with
 Three score-side tricks were ported to FM and rejected by matched sweeps. Log-noise $t$ sampling changes CRPS by $<0.4\%$ relative to uniform-$t$; min-SNR loss weighting either matches uniform ($\gamma=5$) or hurts CRPS ($\gamma=1$); and mean-scale residualization worsens CRPS by 8--11\%. The FM headline therefore keeps the simpler recipe: uniform $t$, uniform loss weighting, and mean residualization.
 
 \section{Discussion}\label{sec:disc}
-Two findings deserve emphasis. First, the per-row attribution table separates score-side and FM contributions cleanly, so the FM result is not implicitly absorbing improvements that belong to the score track. Second, the deterministic ODE wins under matched residualizer on the benchmark suite, despite the theoretical appeal of marginal-preserving SDE samplers. The common mechanism behind the score$^+$ and FM gains is regression conditioning for tree ensembles: EDM preconditioning stabilises the VE score path's inputs and denoising residual, while VP-FM avoids much of the same conditioning problem through the path geometry itself. This is not a single target-scaling story; log-$\sigma$ sampling controls where tree capacity is spent, the log-$\sigma$ feature exposes the noise regime, and Heun ODE sampling is an inference-side efficiency gain. The large-dataset inversion argues against a blanket ``SDE is worse'' interpretation: per-IQR-bin diagnostics show that stochasticity can improve high-uncertainty tail coverage, while the aggregate metrics penalise the same runs for broader intervals, worse CRPS, and higher latency.
+Two findings deserve emphasis. First, the per-row attribution table separates score-side and FM contributions cleanly, so the FM result is not implicitly absorbing improvements that belong to the score track. Second, per-dataset tuning turns the headline into a tradeoff rather than a single-winner story: score$^+$ is the strongest calibrated Treeffuser row, whereas FM is the strongest normalized-CRPS and latency row. The common mechanism behind both gains is regression conditioning for tree ensembles: EDM preconditioning stabilises the VE score path's inputs and denoising residual, while VP-FM avoids much of the same conditioning problem through the path geometry itself. This is not a single target-scaling story; log-$\sigma$ sampling controls where tree capacity is spent, the log-$\sigma$ feature exposes the noise regime, and Heun ODE sampling is an inference-side efficiency gain. The large-dataset inversion argues against a blanket ``SDE is worse'' interpretation: per-IQR-bin diagnostics show that stochasticity can improve high-uncertainty tail coverage, while the aggregate metrics penalise the same runs for broader intervals, worse CRPS, and higher latency.
 
-\paragraph{Limitations.} External baselines use fixed family-level grids selected on a small validation suite, not per-dataset Bayesian optimization. We include NGBoost, iBUG, CatBoost uncertainty, quantile-regression LightGBM, a deep ensemble, and a CARD-style neural diffusion baseline, but not distributional random forests~\citep{cevid2022drf}. More importantly, the residualizer and score+/FM hyperparameters are fixed by sweeps run mostly on small-to-mid datasets and reused across the suite; the large-dataset inversions in Table~\ref{tab:per-dataset} identify per-dataset residualizer and time-sampling selection as the main remaining tuning axis. Headline tables use three data/model/sampler seeds, so per-dataset gaps, especially on the largest datasets, should be read as descriptive rather than as high-powered significance estimates.
+\paragraph{Limitations.} The comparison is now stronger because all displayed families are tuned per dataset, but it is still finite-budget model selection: the Optuna spaces differ in dimensionality and computational cost. We include NGBoost, iBUG, CatBoost uncertainty, quantile-regression LightGBM, a deep ensemble, and a CARD-style neural diffusion baseline, but not distributional random forests~\citep{cevid2022drf}. Headline tables average five evaluation folds after one tuning fold, so per-dataset gaps, especially on the largest datasets, should be read as descriptive rather than as high-powered significance estimates. The remaining modelling limitation is conditional selection: choosing between score$^+$, FM, and stochastic samplers should ultimately be driven by the user's calibration and latency target, not by aggregate CRPS alone.
 
-\paragraph{Future work.} Two threads merit investigation: dataset-adaptive residualizer selection, and explicit selection criteria for stochastic-interpolant samplers when calibrated \emph{conditional} (rather than marginal) coverage matters.
+\paragraph{Future work.} Two threads merit investigation: budget-normalized tuning across probabilistic families, and explicit selection criteria for stochastic-interpolant samplers when calibrated \emph{conditional} (rather than marginal) coverage matters.
 
 \begin{contributions}
 Author contributions are deferred to camera-ready.
@@ -435,39 +435,38 @@ VP edges trig on CRPS and tail coverage; both Pareto-dominate linear on $|\text{
 
 \section{Probabilistic-Family Baselines}\label{app:competitors}
 
-We compare the headline Treeffuser variants against six external probabilistic regressors (Table~\ref{tab:competitors}). Hyperparameters for each baseline were selected by a fixed per-model grid summarised in this appendix's accompanying configs (\texttt{benchmarks/configs/probabilistic\_baseline\_hyperparams/}); this is a contextual comparison, not per-dataset Bayesian optimization. The CARD row uses a compact benchmark adapter with the same two-stage conditional-mean plus conditional-diffusion structure as CARD~\citep{han2022card}.
+We compare the headline Treeffuser variants against six external probabilistic regressors (Table~\ref{tab:competitors}). Hyperparameters for every displayed family are selected per dataset on the same fold-0 tuning split, then evaluated on folds~1--5. The CARD row uses a compact benchmark adapter with the same two-stage conditional-mean plus conditional-diffusion structure as CARD~\citep{han2022card}.
 
 \begin{table}[!h]
   \centering
-  \caption{Probabilistic baselines: 10 UCI datasets $\times$ 3 seeds, matched full-data train/test splits. rel-CRPS is normalized by the best displayed variant on each dataset. Sample-time excludes fitting.}\label{tab:competitors}
+  \caption{Probabilistic baselines under the tuning/evaluation protocol. rel-CRPS is normalized by the best displayed variant on each dataset. Sample-time excludes fitting.}\label{tab:competitors}
   \scriptsize
   \begin{tabular}{lrrrrrr}
     \toprule
     Model & CRPSS $\uparrow$ & rel-CRPS $\downarrow$ & CRPS $\downarrow$ & $q$-MACE $\downarrow$ & $|\text{cE}|$@95 $\downarrow$ & samp s \\
     \midrule
-    Treeffuser-FM-residE (ours)     & \textbf{0.671} & \textbf{1.050} & 4.064 & 0.039 & \textbf{0.015} & 20.43 \\
-    Treeffuser-FM-fast (ours)       & 0.669 & 1.061 & 4.060 & 0.039 & 0.017 & 8.68 \\
-    Treeffuser-score$^+$ (ours)     & 0.669 & 1.060 & 4.070 & \textbf{0.038} & 0.026 & 28.57 \\
-    Treeffuser-published            & 0.652 & 1.257 & 4.170 & 0.056 & 0.029 & 88.12 \\
-    Quantile-regression LightGBM    & 0.648 & 1.402 & \textbf{3.942} & 0.041 & 0.052 & 0.12 \\
-    CatBoost (uncertainty)          & 0.613 & 1.448 & 4.034 & 0.042 & 0.042 & \textbf{0.00} \\
-    NGBoost (Gaussian)              & 0.591 & 1.446 & 4.257 & 0.046 & 0.064 & 0.09 \\
-    Deep ensemble                   & 0.529 & 3.742 & 4.588 & 0.042 & 0.026 & 0.01 \\
-    iBUG (XGBoost)                  & 0.487 & 3.963 & 4.699 & 0.061 & 0.021 & 1.51 \\
-    CARD-style diffusion            & 0.379 & 6.697 & 6.248 & 0.047 & 0.022 & 0.83 \\
+    Treeffuser-score$^+$ (ours)     & \textbf{0.681} & 1.131 & 4.057 & \textbf{0.028} & \textbf{0.015} & 34.12 \\
+    Treeffuser-FM-fast (ours)       & 0.680 & \textbf{1.117} & 4.121 & 0.034 & 0.024 & 14.41 \\
+    Treeffuser-published            & 0.670 & 1.242 & 4.279 & 0.044 & 0.023 & 221.35 \\
+    Quantile-regression LightGBM    & 0.668 & 1.459 & 4.026 & 0.033 & 0.044 & 0.30 \\
+    Deep ensemble                   & 0.654 & 1.519 & \textbf{4.008} & 0.050 & 0.018 & 0.03 \\
+    iBUG (XGBoost)                  & 0.649 & 1.471 & 4.193 & 0.069 & 0.065 & 2.89 \\
+    CatBoost (uncertainty)          & 0.638 & 1.409 & 4.045 & 0.045 & 0.066 & \textbf{0.01} \\
+    CARD-style diffusion            & 0.631 & 1.632 & 4.838 & 0.051 & 0.043 & 42.84 \\
+    NGBoost (Gaussian)              & 0.601 & 1.550 & 4.299 & 0.052 & 0.101 & 0.04 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Under this fixed-grid protocol, the Treeffuser variants lead on CRPSS, rel-CRPS, and coverage metrics. Quantile-regression LightGBM is strongest on raw CRPS, but it is worse on rel-CRPS and has $3\times$ the 95\% coverage error of \textsc{FM-fast}. Deep ensembles, iBUG, and CARD-style diffusion have reasonable tail coverage but poor normalized CRPS, indicating broad or miscentered predictive distributions rather than uniformly stronger uncertainty estimates.
+Under this per-dataset tuning protocol, the Treeffuser variants lead on aggregate CRPSS, rel-CRPS, and coverage metrics. The external baselines are still important: deep ensembles have the best mean raw CRPS, and the per-dataset winners include deep ensembles on \texttt{diabetes} and \texttt{kin8nm}, CARD on \texttt{naval}, and quantile-regression LightGBM on \texttt{protein}. Their aggregate rel-CRPS remains worse, indicating that no single tuned external family transfers as evenly across the benchmark suite as the Treeffuser variants.
 
 \section{Extended Per-Dataset Results}\label{app:perdata-ext}
 
-Table~\ref{tab:perdata-ext} reports CRPS, $|\text{cE}|$@90, and sample-generation time on each of the ten benchmarks for the three headline variants, averaged over 3 seeds and over the full row count of each dataset. The ``best margin'' column gives the gap between the winning variant and the second-best variant in raw CRPS, which makes the asymmetry called out in \S\ref{sec:perdata} explicit: the published baseline's three wins (wine, california housing, protein) are by $2.3$--$3.8\%$ while its losses on yacht / concrete / kin8nm / naval / energy are $27$--$69\%$.
+Table~\ref{tab:perdata-ext} reports CRPS, $|\text{cE}|$@90, and sample-generation time on each of the ten benchmarks for the three headline Treeffuser variants, averaged over the five evaluation folds. The ``best margin'' column gives the gap between the winning variant and the second-best Treeffuser variant in raw CRPS. After per-dataset tuning, the margins are tighter: the main result is no longer a few dramatic wins, but a more balanced Pareto surface between published SDE sampling, score-side conditioning, and FM speed.
 
 \begin{table}[!h]
   \centering
-  \caption{Extended per-dataset results, ordered roughly by $n_{\text{train}}$. ``best margin'' is winner-over-second-best in raw CRPS; the bold cell in each block is the per-metric winner on that row. Numbers come from \texttt{paper\_real\_data\_v2\_full.jsonl}.}\label{tab:perdata-ext}
+  \caption{Extended per-dataset Treeffuser results, ordered roughly by evaluation-fold training size. ``best margin'' is winner-over-second-best in raw CRPS; the bold cell in each block is the per-metric winner on that row. Numbers come from \texttt{benchmarks/results/tuning/eval/*.jsonl}.}\label{tab:perdata-ext}
   \scriptsize
   \begin{tabular}{lrrrrrrrrrr}
     \toprule
@@ -475,21 +474,21 @@ Table~\ref{tab:perdata-ext} reports CRPS, $|\text{cE}|$@90, and sample-generatio
     \cmidrule(lr){3-5} \cmidrule(lr){6-8} \cmidrule(lr){9-11}
     Dataset & best margin & Pub.\ & Score$^+$ & FM & Pub.\ & Score$^+$ & FM & Pub.\ & Score$^+$ & FM \\
     \midrule
-    yacht              & Sco$^+$\,$+$6.9\% & 0.330 & \textbf{0.195} & 0.209 & 0.089 & 0.141 & \textbf{0.055} & 0.5 & 0.3 & \textbf{0.1} \\
-    diabetes           & FM\,$+$0.3\%      & 34.75 & 34.52 & \textbf{34.41} & 0.081 & 0.038 & \textbf{0.030} & 0.8 & 0.4 & \textbf{0.1} \\
-    energy             & FM\,$+$0.8\%      & 0.259 & 0.190 & \textbf{0.188} & 0.091 & 0.048 & \textbf{0.023} & 2.1 & 0.5 & \textbf{0.4} \\
-    concrete           & FM\,$+$1.2\%      & 2.269 & 1.795 & \textbf{1.773} & 0.077 & \textbf{0.026} & 0.029 & 1.4 & 0.7 & \textbf{0.5} \\
-    wine               & Pub\,$+$3.8\%     & \textbf{0.306} & 0.318 & 0.317 & 0.029 & 0.014 & \textbf{0.006} & 20.7 & 3.6 & \textbf{3.1} \\
-    kin8nm             & FM\,$+$2.3\%      & 0.076 & 0.061 & \textbf{0.060} & 0.020 & \textbf{0.010} & 0.012 & 19.6 & 6.7 & \textbf{4.7} \\
-    power              & Sco$^+$\,$+$0.4\% & 1.715 & \textbf{1.568} & 1.575 & 0.021 & \textbf{0.012} & 0.013 & 37.0 & 6.7 & \textbf{4.1} \\
-    naval              & FM\,$+$2.2\%      & 0.000 & 0.000 & \textbf{0.000} & 0.089 & 0.071 & \textbf{0.064} & 185.0 & 24.8 & \textbf{10.4} \\
-    cali.\ housing     & Pub\,$+$2.3\%     & \textbf{0.207} & 0.212 & 0.214 & 0.023 & 0.007 & \textbf{0.004} & 105.1 & 28.0 & \textbf{10.0} \\
-    protein            & Pub\,$+$3.4\%     & \textbf{1.787} & 1.847 & 1.860 & \textbf{0.005} & 0.008 & 0.008 & 509.1 & 214.1 & \textbf{53.2} \\
+    yacht              & FM\,$+$0.4\%      & 0.438 & 0.284 & \textbf{0.283} & 0.092 & \textbf{0.025} & 0.081 & 0.3 & 0.3 & \textbf{0.1} \\
+    diabetes           & Sco$^+$\,$+$1.9\% & 35.682 & \textbf{34.025} & 34.660 & 0.079 & \textbf{0.029} & 0.038 & 2.4 & 0.5 & \textbf{0.2} \\
+    energy             & FM\,$+$5.2\%      & 0.252 & 0.214 & \textbf{0.204} & 0.081 & 0.034 & \textbf{0.022} & 2.9 & 0.8 & \textbf{0.6} \\
+    concrete           & Sco$^+$\,$+$1.5\% & 2.457 & \textbf{2.126} & 2.158 & 0.034 & 0.025 & \textbf{0.023} & 3.0 & 4.8 & \textbf{0.8} \\
+    wine               & Pub\,$+$5.9\%     & \textbf{0.300} & 0.319 & 0.318 & 0.037 & \textbf{0.006} & 0.016 & 100.4 & 37.0 & \textbf{11.9} \\
+    kin8nm             & FM\,$+$4.0\%      & 0.067 & 0.058 & \textbf{0.055} & 0.012 & \textbf{0.004} & 0.023 & 22.0 & 20.2 & \textbf{9.2} \\
+    power              & FM\,$+$2.4\%      & 1.671 & 1.572 & \textbf{1.535} & 0.013 & \textbf{0.004} & 0.006 & 14.6 & \textbf{6.7} & 7.6 \\
+    naval              & FM\,$+$3.2\%      & 0.000218 & 0.000220 & \textbf{0.000211} & 0.078 & 0.065 & \textbf{0.061} & 207.4 & 91.2 & \textbf{29.5} \\
+    cali.\ housing     & Pub\,$+$3.6\%     & \textbf{0.197} & 0.204 & 0.206 & 0.010 & \textbf{0.005} & 0.007 & 605.9 & 52.6 & \textbf{19.2} \\
+    protein            & Pub\,$+$2.7\%     & \textbf{1.722} & 1.769 & 1.796 & \textbf{0.005} & 0.005 & 0.007 & 1254.7 & 127.0 & \textbf{64.9} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-FM is the fastest sampler on every dataset, with the lead widening on the largest two: on \texttt{protein} the speedup is $9.6\times$ over \textsc{published} and $4.0\times$ over \textsc{score$^+$}; on \texttt{california\_housing} the corresponding speedups are $10.5\times$ and $2.8\times$. On $|\text{cE}|$@90 FM leads on 7/10 datasets and \textsc{score$^+$} on 2/10. The per-dataset CRPS ranking reproduces the headline pattern, and the relative-margin column shows clearly that \textsc{published}'s reclaim of the largest datasets is narrow whereas its losses on the small-to-mid suite are wide; the mean rel-CRPS in Table~\ref{tab:headline} assigns the published baseline a $1.240$ score against $1.047$ / $1.048$ for \textsc{score$^+$} / \textsc{FM}.
+FM is the fastest Treeffuser sampler on 9/10 datasets and is especially valuable at scale: on \texttt{protein} the speedup is $19.3\times$ over \textsc{published} and $2.0\times$ over \textsc{score$^+$}; on \texttt{california\_housing} the corresponding speedups are $31.6\times$ and $2.7\times$. On $|\text{cE}|$@90, however, \textsc{score$^+$} leads on 6/10 datasets and FM on 3/10, which is why Table~\ref{tab:headline} separates normalized-CRPS and calibration conclusions. The per-dataset CRPS ranking reproduces the headline pattern: FM has the best average normalized CRPS, score$^+$ is the more reliable calibration row, and the published SDE remains best on wine, california housing, and protein.
 
 \section{Conditional Tail Calibration Diagnostic}\label{app:tail-diagnostic}
 
@@ -525,7 +524,7 @@ The diagnostic supports a tradeoff rather than a one-sided conclusion. On \textt
 
 \section{Reproducibility}\label{app:repro}
 
-All sweeps in this paper are driven by YAML configs under \texttt{benchmarks/configs/}. Each result file is a JSON Lines document recording the full hyperparameter set, the random seeds (data/model/sampler), the git commit hash of the model code, a hash of the Treeffuser source tree, and every reported metric on a per-(dataset, seed) row. The full-data Treeffuser and original external-baseline runs used commit \texttt{99e3665} of the model source (\texttt{git\_sha} field on every row of \texttt{paper\_real\_data\_v2\_full.jsonl} and \texttt{paper\_probabilistic\_baselines\_selected\_full.jsonl}); the CARD add-on rows are recorded separately in \texttt{paper\_probabilistic\_baselines\_card\_selected\_full.jsonl}. The configs that produced the appendix tables are listed alongside in Table~\ref{tab:appendix-provenance}.
+All sweeps in this paper are driven by YAML configs under \texttt{benchmarks/configs/}. Each result file is a JSON Lines document recording the full hyperparameter set, random seeds, the git commit hash of the model code, a hash of the Treeffuser source tree, and every reported metric on a per-dataset/per-fold row. The headline tuning runs persist their selected configurations under \texttt{benchmarks/results/tuning/best\_params/} and their five-fold evaluation rows under \texttt{benchmarks/results/tuning/eval/}. The configs that produced the appendix tables are listed alongside in Table~\ref{tab:appendix-provenance}.
 
 \begin{table}[!h]
   \centering
@@ -544,8 +543,7 @@ All sweeps in this paper are driven by YAML configs under \texttt{benchmarks/con
     \ref{tab:minsnr}        & \texttt{fm\_loss\_weighting\_sweep.yaml} & \texttt{fm\_loss\_weighting\_sweep\_\_*.jsonl} \\
     \ref{tab:stoch-eps}     & \texttt{sde\_lower\_stoch\_sweep.yaml}, \texttt{stochasticity\_schedule\_sweep.yaml} & \texttt{sde\_lower\_stoch\_sweep\_\_*.jsonl}, \texttt{stochasticity\_schedule\_sweep\_\_*.jsonl} \\
     \ref{tab:path}          & \texttt{flow\_path\_sweep.yaml}          & \texttt{flow\_path\_sweep\_\_*.jsonl} \\
-    \ref{tab:competitors}   & \texttt{paper\_probabilistic\_baselines\_selected.yaml} & \texttt{paper\_probabilistic\_baselines\_selected\_full.jsonl}, \texttt{paper\_probabilistic\_baselines\_card\_selected\_full.jsonl} \\
-    \ref{tab:per-dataset}, \ref{tab:perdata-ext}, \ref{tab:headline} & \texttt{paper\_real\_data\_v2.yaml} & \texttt{paper\_real\_data\_v2\_full.jsonl} \\
+    \ref{tab:competitors}, \ref{tab:per-dataset}, \ref{tab:perdata-ext}, \ref{tab:headline} & \texttt{tuning\_manifest.yaml} & \texttt{benchmarks/results/tuning/eval/*.jsonl} \\
     \ref{tab:tail-diagnostic} & \texttt{paper\_real\_data\_v2.yaml}, \texttt{tail\_calibration\_full.yaml} & \texttt{paper\_real\_data\_v2\_full.jsonl}, \texttt{tail\_calibration\_full.jsonl} \\
     \bottomrule
   \end{tabular}}

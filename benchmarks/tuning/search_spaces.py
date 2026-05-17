@@ -217,12 +217,16 @@ DRF = SearchSpace(
 LGBM_QUANTILE = SearchSpace(
     model="qreg_lightgbm",
     tunable=lambda t: {
-        "quantile_count": t.suggest_categorical("quantile_count", [9, 19, 49, 99]),
-        "n_estimators": t.suggest_int("n_estimators", 200, 3000, log=True),
-        "learning_rate": t.suggest_float("learning_rate", 1e-3, 0.3, log=True),
-        "num_leaves": t.suggest_int("num_leaves", 15, 255),
+        "quantile_count": t.suggest_int("quantile_count", 24, 49),
+        "n_estimators": t.suggest_int("n_estimators", 50, 500, log=True),
+        "learning_rate": t.suggest_float("learning_rate", 0.02, 0.2, log=True),
+        "num_leaves": t.suggest_int("num_leaves", 15, 127),
     },
-    fixed={},
+    fixed={
+        "min_child_samples": 20,
+        "n_jobs": -1,
+        "early_stopping_rounds": 30,
+    },
 )
 
 
